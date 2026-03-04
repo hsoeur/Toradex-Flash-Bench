@@ -1,0 +1,26 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Start Dev Server",
+			"type": "shell",
+			"command": "export NVM_DIR=\"$HOME/.nvm\" && . \"$NVM_DIR/nvm.sh\" && npm run dev",
+			"isBackground": true,
+			"problemMatcher": [],
+			"group": "build"
+		},
+		{
+			"label": "Start Backend",
+			"type": "shell",
+			"command": "cd ${workspaceFolder}/backend && .venv/bin/python main.py",
+			"isBackground": true,
+			"group": "build",
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"label": "FlashBench Backend"
+			},
+			"problemMatcher": []
+		}
+	]
+}

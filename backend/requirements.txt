@@ -1,0 +1,9 @@
+flask>=3.0
+flask-socketio>=5.3
+flask-cors>=4.0
+python-socketio>=5.10
+uvicorn>=0.29          # used by ServicesManager to spawn mac_api
+fastapi>=0.110         # api.py
+mysql-connector-python>=8.3  # api.py
+# No eventlet/gevent needed — async_mode="threading" is used (see main.py)
+

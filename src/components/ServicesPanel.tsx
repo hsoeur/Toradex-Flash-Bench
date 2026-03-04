@@ -17,9 +17,10 @@ export interface ServiceLogEntry {
 }
 
 export interface ServicesStatus {
-  mac_api: 'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
-  docker:  'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
-  db_connection: 'connected' | 'disconnected' | 'checking';
+  mac_api:        'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
+  docker:         'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
+  db_connection:  'connected' | 'disconnected' | 'checking';
+  mac_api_health: 'up' | 'down' | 'unknown';
 }
 
 interface Props {
@@ -292,6 +293,21 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
                 onStop={stopMacApi}
                 onRestart={restartMacApi}
               />
+              {/* HTTP health indicator */}
+              <div className={`svc-db-detail svc-db-detail--${
+                servicesStatus.mac_api_health === 'up'      ? 'connected' :
+                servicesStatus.mac_api_health === 'down'    ? 'disconnected' :
+                                                              'checking'
+              }`}>
+                <span className="svc-db-detail__dot" />
+                <span>
+                  {servicesStatus.mac_api_health === 'up'
+                    ? 'API health OK — localhost:8000/health'
+                    : servicesStatus.mac_api_health === 'down'
+                    ? 'API injoignable — localhost:8000/health'
+                    : 'Vérification de l\'API…'}
+                </span>
+              </div>
               <ServiceLogPane lines={logs.mac_api} />
             </>
           )}
