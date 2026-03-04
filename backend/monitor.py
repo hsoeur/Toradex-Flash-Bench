@@ -167,36 +167,105 @@ class SerialListener:
     """
     Listens on TCP_PORT for incoming board announcements.
     Each board sends its serial number as a plain UTF-8 string.
+
+    The internal watchdog loop automatically restarts the TCP server
+    whenever it crashes, using exponential back-off (max 60 s).
     """
 
-    def __init__(self, store: ModuleStore, host: str = TCP_HOST, port: int = TCP_PORT) -> None:
+    # Status values: 'starting' | 'running' | 'error' | 'restarting'
+    RETRY_BASE_DELAY = 2      # seconds before first retry
+    RETRY_MAX_DELAY  = 60     # cap for exponential back-off
+
+    def __init__(
+        self,
+        store: ModuleStore,
+        host: str = TCP_HOST,
+        port: int = TCP_PORT,
+        on_status_changed: Optional[Callable[[str], None]] = None,
+    ) -> None:
         self.store   = store
         self.host    = host
         self.port    = port
-        self._thread = threading.Thread(target=self._run, name="SerialListener", daemon=True)
+        self._on_status_changed = on_status_changed
+
+        self._status:      str           = "starting"
+        self._last_error:  str           = ""
+        self._retry_count: int           = 0
+        self._lock                       = threading.Lock()
+
+        self._thread = threading.Thread(
+            target=self._watchdog, name="SerialListener", daemon=True
+        )
+
+    # ── public API ────────────────────────────────
 
     def start(self) -> None:
         self._thread.start()
-        logger.info("SerialListener started on %s:%d", self.host, self.port)
+        logger.info("SerialListener watchdog started — will bind on %s:%d", self.host, self.port)
 
-    def _run(self) -> None:
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
-                srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-                srv.bind((self.host, self.port))
-                srv.listen()
-                logger.info("SerialListener waiting for connections on port %d", self.port)
+    def get_status(self) -> dict:
+        with self._lock:
+            return {
+                "status":      self._status,
+                "last_error":  self._last_error,
+                "retry_count": self._retry_count,
+                "host":        self.host,
+                "port":        self.port,
+            }
 
-                while True:
-                    conn, addr = srv.accept()
-                    threading.Thread(
-                        target=self._handle_client,
-                        args=(conn, addr),
-                        daemon=True,
-                    ).start()
+    # ── internal ──────────────────────────────────
 
-        except Exception:
-            logger.error("Fatal exception in SerialListener:\n%s", traceback.format_exc())
+    def _set_status(self, status: str, error: str = "") -> None:
+        with self._lock:
+            self._status     = status
+            self._last_error = error
+        logger.info("SerialListener status → %s%s", status, f" | {error}" if error else "")
+        if self._on_status_changed:
+            try:
+                self._on_status_changed(status)
+            except Exception:
+                pass
+
+    def _watchdog(self) -> None:
+        """
+        Outer retry loop: (re-)starts the TCP server on any failure.
+        Uses exponential back-off up to RETRY_MAX_DELAY seconds.
+        """
+        delay = self.RETRY_BASE_DELAY
+        while True:
+            try:
+                self._set_status("starting")
+                self._serve()
+                # _serve() normally blocks forever; reaching here means clean exit
+                break
+            except Exception:
+                err = traceback.format_exc()
+                self._retry_count += 1
+                self._set_status("error", err.splitlines()[-1])
+                logger.error(
+                    "SerialListener crashed (retry #%d, next attempt in %ds):\n%s",
+                    self._retry_count, delay, err,
+                )
+                time.sleep(delay)
+                delay = min(delay * 2, self.RETRY_MAX_DELAY)
+                self._set_status("restarting")
+
+    def _serve(self) -> None:
+        """Inner TCP accept loop — runs until an exception escapes."""
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            srv.bind((self.host, self.port))
+            srv.listen()
+            self._set_status("running")
+            logger.info("SerialListener waiting for connections on port %d", self.port)
+
+            while True:
+                conn, addr = srv.accept()
+                threading.Thread(
+                    target=self._handle_client,
+                    args=(conn, addr),
+                    daemon=True,
+                ).start()
 
     def _handle_client(self, conn: socket.socket, addr: tuple) -> None:
         with conn:

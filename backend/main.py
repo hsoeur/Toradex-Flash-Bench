@@ -121,7 +121,17 @@ def _on_modules_changed(snapshot: dict) -> None:
 
 module_store.subscribe(_on_modules_changed)
 
-serial_listener = SerialListener(store=module_store)
+def _on_serial_listener_status_changed(_status: str) -> None:
+    try:
+        socketio.emit("monitor_status", serial_listener.get_status())
+    except Exception:
+        logger.error("Error emitting monitor_status:\n%s", traceback.format_exc())
+
+
+serial_listener = SerialListener(
+    store=module_store,
+    on_status_changed=_on_serial_listener_status_changed,
+)
 nginx_monitor   = NginxMonitor(store=module_store)
 
 # ══════════════════════════════════════════════════
@@ -164,6 +174,7 @@ def handle_connect(auth=None):
 
     sio_emit("modules_update",  module_store.snapshot())
     sio_emit("services_status", services_manager.get_status())
+    sio_emit("monitor_status",  serial_listener.get_status())
 
 
 @socketio.on("disconnect")
@@ -200,8 +211,9 @@ def mac_api_restart():
 @app.get("/api/status")
 def get_status():
     return jsonify({
-        "modules":  module_store.snapshot(),
-        "services": services_manager.get_status(),
+        "modules":         module_store.snapshot(),
+        "services":        services_manager.get_status(),
+        "serial_listener": serial_listener.get_status(),
     })
 
 

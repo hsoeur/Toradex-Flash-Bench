@@ -22,11 +22,20 @@ export interface ServicesStatus {
   nginx_status:   'active' | 'inactive' | 'unknown';
 }
 
+export interface MonitorStatus {
+  status:      'starting' | 'running' | 'error' | 'restarting';
+  last_error:  string;
+  retry_count: number;
+  host:        string;
+  port:        number;
+}
+
 interface Props {
   socket: Socket | null;
   open: boolean;
   onClose: () => void;
   servicesStatus: ServicesStatus;
+  monitorStatus: MonitorStatus;
 }
 
 // ──────────────────────────────────────────────────
@@ -192,7 +201,7 @@ const TABS: { id: ServiceSource; label: string }[] = [
   { id: 'db',      label: 'Base de données' },
 ];
 
-export default function ServicesPanel({ socket, open, onClose, servicesStatus }: Props) {
+export default function ServicesPanel({ socket, open, onClose, servicesStatus, monitorStatus }: Props) {
   const [activeTab, setActiveTab] = useState<ServiceSource>('dhcp');
   const [logs, setLogs] = useState<Record<ServiceSource, ServiceLogEntry[]>>({
     dhcp: [], nginx: [], mac_api: [], db: [],
@@ -261,7 +270,28 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
           <button className="console-panel__btn console-panel__btn--close" onClick={onClose}>✕</button>
         </div>
 
-        {/* Tabs */}
+        {/* Monitor TCP :5000 status bar */}
+        <div className={`svc-monitor-bar svc-monitor-bar--${
+          monitorStatus.status === 'running'    ? 'running'    :
+          monitorStatus.status === 'error'      ? 'error'      :
+          monitorStatus.status === 'restarting' ? 'restarting' :
+                                                  'starting'
+        }`}>
+          <span className="svc-monitor-bar__dot" />
+          <span className="svc-monitor-bar__text">
+            <strong>Monitor TCP :{monitorStatus.port}</strong>
+            {' — '}
+            {monitorStatus.status === 'running'    ? 'En écoute' :
+             monitorStatus.status === 'error'      ? `Erreur${monitorStatus.last_error ? ` : ${monitorStatus.last_error}` : ''}` :
+             monitorStatus.status === 'restarting' ? 'Redémarrage…' :
+                                                     'Démarrage…'}
+            {monitorStatus.retry_count > 0 && (
+              <span className="svc-monitor-bar__retries">
+                &nbsp; ({monitorStatus.retry_count} tentative{monitorStatus.retry_count > 1 ? 's' : ''})
+              </span>
+            )}
+          </span>
+        </div>
         <div className="svc-tabs">
           {TABS.map(tab => (
             <button

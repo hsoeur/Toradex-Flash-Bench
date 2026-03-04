@@ -1,0 +1,38 @@
+[Unit]
+Description=FlashBench Backend (Flask-SocketIO + SerialListener :5000)
+After=network.target
+
+[Service]
+# ── Identité ───────────────────────────────────────────────
+User=romu_admin
+Group=romu_admin
+
+# ── Répertoire de travail ──────────────────────────────────
+WorkingDirectory=/home/romu_admin/Documents/ProgToradex/Toradex-Flash-Bench/backend
+
+# ── Commande de démarrage (venv embarqué) ─────────────────
+ExecStart=/home/romu_admin/Documents/ProgToradex/Toradex-Flash-Bench/backend/.venv/bin/python main.py
+
+# ── Variables d'environnement ─────────────────────────────
+Environment=PYTHONUNBUFFERED=1
+
+# ── Redémarrage automatique ───────────────────────────────
+# Redémarre dans tous les cas (crash, signal, sortie propre)
+Restart=always
+# Délai avant chaque tentative de redémarrage
+RestartSec=5
+
+# ── Journalisation ────────────────────────────────────────
+# Les logs stdout/stderr sont capturés par journald.
+# Pour les consulter : journalctl -u flashbench -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=flashbench
+
+# ── Limites ───────────────────────────────────────────────
+# Laisser le processus binder le port 5000 sans être root
+# (si net.ipv4.ip_unprivileged_port_start est <= 5000, pas besoin)
+# AmbientCapabilities=CAP_NET_BIND_SERVICE
+
+[Install]
+WantedBy=multi-user.target

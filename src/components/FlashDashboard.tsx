@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import type { ModulesMap } from '../types/board';
 import BoardCard from './BoardCard';
 import ConsolePanel from './ConsolePanel';
-import ServicesPanel, { type ServicesStatus } from './ServicesPanel';
+import ServicesPanel, { type ServicesStatus, type MonitorStatus } from './ServicesPanel';
 
 const BACKEND_URL = 'http://localhost:5001';
 
@@ -17,12 +17,21 @@ const DEFAULT_SERVICES_STATUS: ServicesStatus = {
   nginx_status:   'unknown',
 };
 
+const DEFAULT_MONITOR_STATUS: MonitorStatus = {
+  status:      'starting',
+  last_error:  '',
+  retry_count: 0,
+  host:        '0.0.0.0',
+  port:        5000,
+};
+
 export default function FlashDashboard() {
   const [modules, setModules] = useState<ModulesMap>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus>(DEFAULT_SERVICES_STATUS);
+  const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>(DEFAULT_MONITOR_STATUS);
   const [socket, setSocket] = useState<Socket | null>(null);
 
   useEffect(() => {
@@ -32,8 +41,9 @@ export default function FlashDashboard() {
     s.on('connect',       () => setConnectionStatus('connected'));
     s.on('disconnect',    () => setConnectionStatus('disconnected'));
     s.on('connect_error', () => setConnectionStatus('disconnected'));
-    s.on('modules_update', (data: ModulesMap) => setModules({ ...data }));
-    s.on('services_status', (data: ServicesStatus) => setServicesStatus(data));
+    s.on('modules_update',  (data: ModulesMap)      => setModules({ ...data }));
+    s.on('services_status', (data: ServicesStatus)  => setServicesStatus(data));
+    s.on('monitor_status',  (data: MonitorStatus)   => setMonitorStatus(data));
 
     return () => { s.disconnect(); };
   }, []);
@@ -102,8 +112,19 @@ export default function FlashDashboard() {
               <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.42 1.42M11.54 11.54l1.41 1.41M3.05 12.95l1.42-1.41M11.54 4.46l1.41-1.41" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
             Services
-            {/* DB status dot in button */}
+            {/* DB status dot */}
             <span className={`dashboard__db-dot dashboard__db-dot--${servicesStatus.db_connection}`} />
+            {/* Monitor :5000 dot */}
+            <span
+              className={`dashboard__db-dot dashboard__db-dot--${
+                monitorStatus.status === 'running'    ? 'connected' :
+                monitorStatus.status === 'error'      ? 'disconnected' :
+                                                        'checking'
+              }`}
+              title={`Monitor TCP :5000 — ${monitorStatus.status}${
+                monitorStatus.retry_count > 0 ? ` (${monitorStatus.retry_count} retry)` : ''
+              }`}
+            />
           </button>
 
           <div className={`dashboard__conn dashboard__conn--${connectionStatus}`}>
@@ -156,6 +177,7 @@ export default function FlashDashboard() {
         open={servicesOpen}
         onClose={() => setServicesOpen(false)}
         servicesStatus={servicesStatus}
+        monitorStatus={monitorStatus}
       />
     </div>
   );
