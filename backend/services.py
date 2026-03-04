@@ -132,7 +132,7 @@ class ServicesManager:
     # ── Public API ────────────────────────────────
 
     def start(self) -> None:
-        """Start background monitoring threads."""
+        """Start background monitoring threads and auto-start the MAC API."""
         self._db_thread.start()
         self._mac_api_thread.start()
         self._dnsmasq_thread.start()
@@ -140,6 +140,7 @@ class ServicesManager:
         self._dnsmasq_log_thread.start()
         self._nginx_log_thread.start()
         logger.info("ServicesManager monitoring started")
+        self.mac_api_start()
 
     def get_status(self) -> dict:
         with self._lock:
