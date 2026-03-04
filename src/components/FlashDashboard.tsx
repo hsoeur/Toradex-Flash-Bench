@@ -11,7 +11,6 @@ type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
 const DEFAULT_SERVICES_STATUS: ServicesStatus = {
   mac_api:        'stopped',
-  docker:         'stopped',
   db_connection:  'disconnected',
   mac_api_health: 'unknown',
 };

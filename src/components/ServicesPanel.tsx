@@ -1,13 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import type { Socket } from 'socket.io-client';
 
-const BACKEND_URL = 'http://localhost:5001';
-
 // ──────────────────────────────────────────────────
 // Types
 // ──────────────────────────────────────────────────
 
-export type ServiceSource = 'dhcp' | 'nginx' | 'mac_api' | 'docker';
+export type ServiceSource = 'dhcp' | 'nginx' | 'mac_api' | 'db';
 
 export interface ServiceLogEntry {
   ts: number;
@@ -18,7 +16,6 @@ export interface ServiceLogEntry {
 
 export interface ServicesStatus {
   mac_api:        'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
-  docker:         'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
   db_connection:  'connected' | 'disconnected' | 'checking';
   mac_api_health: 'up' | 'down' | 'unknown';
 }
@@ -34,6 +31,8 @@ interface Props {
 // Helpers
 // ──────────────────────────────────────────────────
 
+const BACKEND_URL = 'http://localhost:5001';
+
 function formatTs(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString('fr-FR', {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
@@ -46,6 +45,70 @@ async function callServiceApi(path: string) {
   } catch {
     // silently ignore — UI state is driven by socket events
   }
+}
+
+// ──────────────────────────────────────────────────
+// Sub-component: Service control row (start / stop)
+// ──────────────────────────────────────────────────
+
+function ServiceControl({
+  label,
+  status,
+  onStart,
+  onStop,
+  onRestart,
+}: {
+  label: string;
+  status: ServicesStatus['mac_api'];
+  onStart: () => void;
+  onStop: () => void;
+  onRestart: () => void;
+}) {
+  const isRunning = status === 'running';
+  const isBusy    = status === 'starting' || status === 'stopping' || status === 'restarting';
+
+  const statusLabel =
+    status === 'running'    ? 'En cours'      :
+    status === 'starting'   ? 'Démarrage…'    :
+    status === 'stopping'   ? 'Arrêt…'        :
+    status === 'restarting' ? 'Redémarrage…'  :
+                              'Arrêté';
+
+  return (
+    <div className="svc-control">
+      <span className="svc-control__label">{label}</span>
+      <span className={`svc-control__badge svc-control__badge--${status}`}>
+        <span className="svc-control__dot" />
+        {statusLabel}
+      </span>
+      <div className="svc-control__actions">
+        <button
+          className="svc-control__btn svc-control__btn--start"
+          onClick={onStart}
+          disabled={isRunning || isBusy}
+          title="Démarrer"
+        >
+          ▶ Démarrer
+        </button>
+        <button
+          className="svc-control__btn svc-control__btn--restart"
+          onClick={onRestart}
+          disabled={!isRunning || isBusy}
+          title="Redémarrer"
+        >
+          ↺ Redémarrer
+        </button>
+        <button
+          className="svc-control__btn svc-control__btn--stop"
+          onClick={onStop}
+          disabled={!isRunning || isBusy}
+          title="Arrêter"
+        >
+          ■ Arrêter
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ──────────────────────────────────────────────────
@@ -117,70 +180,6 @@ function ServiceLogPane({ lines }: { lines: ServiceLogEntry[] }) {
 }
 
 // ──────────────────────────────────────────────────
-// Sub-component: Service control row (start / stop)
-// ──────────────────────────────────────────────────
-
-function ServiceControl({
-  label,
-  status,
-  onStart,
-  onStop,
-  onRestart,
-}: {
-  label: string;
-  status: ServicesStatus['mac_api'] | ServicesStatus['docker'];
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
-}) {
-  const isRunning  = status === 'running';
-  const isBusy     = status === 'starting' || status === 'stopping' || status === 'restarting';
-
-  const statusLabel =
-    status === 'running'    ? 'En cours'   :
-    status === 'starting'   ? 'Démarrage…' :
-    status === 'stopping'   ? 'Arrêt…'     :
-    status === 'restarting' ? 'Redémarrage…' :
-                              'Arrêté';
-
-  return (
-    <div className="svc-control">
-      <span className="svc-control__label">{label}</span>
-      <span className={`svc-control__badge svc-control__badge--${status}`}>
-        <span className="svc-control__dot" />
-        {statusLabel}
-      </span>
-      <div className="svc-control__actions">
-        <button
-          className="svc-control__btn svc-control__btn--start"
-          onClick={onStart}
-          disabled={isRunning || isBusy}
-          title="Démarrer"
-        >
-          ▶ Démarrer
-        </button>
-        <button
-          className="svc-control__btn svc-control__btn--restart"
-          onClick={onRestart}
-          disabled={!isRunning || isBusy}
-          title="Redémarrer"
-        >
-          ↺ Redémarrer
-        </button>
-        <button
-          className="svc-control__btn svc-control__btn--stop"
-          onClick={onStop}
-          disabled={!isRunning || isBusy}
-          title="Arrêter"
-        >
-          ■ Arrêter
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ──────────────────────────────────────────────────
 // Main panel
 // ──────────────────────────────────────────────────
 
@@ -188,13 +187,13 @@ const TABS: { id: ServiceSource; label: string }[] = [
   { id: 'dhcp',    label: 'DHCP' },
   { id: 'nginx',   label: 'NGINX' },
   { id: 'mac_api', label: 'MAC API' },
-  { id: 'docker',  label: 'Docker DB' },
+  { id: 'db',      label: 'Base de données' },
 ];
 
 export default function ServicesPanel({ socket, open, onClose, servicesStatus }: Props) {
   const [activeTab, setActiveTab] = useState<ServiceSource>('dhcp');
   const [logs, setLogs] = useState<Record<ServiceSource, ServiceLogEntry[]>>({
-    dhcp: [], nginx: [], mac_api: [], docker: [],
+    dhcp: [], nginx: [], mac_api: [], db: [],
   });
 
   // ── socket listeners ──────────────────────────
@@ -206,7 +205,7 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
         dhcp:    history.dhcp    ?? [],
         nginx:   history.nginx   ?? [],
         mac_api: history.mac_api ?? [],
-        docker:  history.docker  ?? [],
+        db:      history.db      ?? [],
       });
     };
 
@@ -228,13 +227,9 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
     };
   }, [socket]);
 
-  // ── service actions ───────────────────────────
   const startMacApi   = useCallback(() => callServiceApi('/api/services/mac-api/start'),   []);
   const stopMacApi    = useCallback(() => callServiceApi('/api/services/mac-api/stop'),    []);
   const restartMacApi = useCallback(() => callServiceApi('/api/services/mac-api/restart'), []);
-  const startDocker   = useCallback(() => callServiceApi('/api/services/docker/start'),   []);
-  const stopDocker    = useCallback(() => callServiceApi('/api/services/docker/stop'),    []);
-  const restartDocker = useCallback(() => callServiceApi('/api/services/docker/restart'), []);
 
   const dbStatus = servicesStatus.db_connection;
 
@@ -283,7 +278,7 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
         {/* Tab content */}
         <div className="svc-panel__content">
 
-          {/* MAC API tab: control + logs */}
+          {/* MAC API tab: control + health status + logs */}
           {activeTab === 'mac_api' && (
             <>
               <ServiceControl
@@ -293,11 +288,10 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
                 onStop={stopMacApi}
                 onRestart={restartMacApi}
               />
-              {/* HTTP health indicator */}
               <div className={`svc-db-detail svc-db-detail--${
-                servicesStatus.mac_api_health === 'up'      ? 'connected' :
-                servicesStatus.mac_api_health === 'down'    ? 'disconnected' :
-                                                              'checking'
+                servicesStatus.mac_api_health === 'up'   ? 'connected' :
+                servicesStatus.mac_api_health === 'down' ? 'disconnected' :
+                                                           'checking'
               }`}>
                 <span className="svc-db-detail__dot" />
                 <span>
@@ -312,16 +306,9 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
             </>
           )}
 
-          {/* Docker tab: control + DB status + logs */}
-          {activeTab === 'docker' && (
+          {/* DB tab: connection status + logs */}
+          {activeTab === 'db' && (
             <>
-              <ServiceControl
-                label="Docker Compose  (MySQL :3307 + phpMyAdmin :8081)"
-                status={servicesStatus.docker}
-                onStart={startDocker}
-                onStop={stopDocker}
-                onRestart={restartDocker}
-              />
               <div className={`svc-db-detail svc-db-detail--${dbStatus}`}>
                 <span className="svc-db-detail__dot" />
                 <span>
@@ -332,7 +319,7 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
                     : 'MySQL localhost:3307 — injoignable'}
                 </span>
               </div>
-              <ServiceLogPane lines={logs.docker} />
+              <ServiceLogPane lines={logs.db} />
             </>
           )}
 

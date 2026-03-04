@@ -143,7 +143,6 @@ def _on_service_log(entry: dict) -> None:
 services_manager = ServicesManager(
     on_status_changed=_on_services_status_changed,
     on_service_log=_on_service_log,
-    work_dir=WORK_DIR,
 )
 
 # ══════════════════════════════════════════════════
@@ -174,8 +173,9 @@ def handle_disconnect():
     logger.info("Client disconnected | sid=%s", sid)
 
 
+
 # ══════════════════════════════════════════════════
-# REST routes — service lifecycle control
+# REST routes — mac_api lifecycle control
 # ══════════════════════════════════════════════════
 
 
@@ -194,24 +194,6 @@ def mac_api_stop():
 @app.post("/api/services/mac-api/restart")
 def mac_api_restart():
     services_manager.mac_api_restart()
-    return jsonify({"ok": True})
-
-
-@app.post("/api/services/docker/start")
-def docker_start():
-    services_manager.docker_start()
-    return jsonify({"ok": True})
-
-
-@app.post("/api/services/docker/stop")
-def docker_stop():
-    services_manager.docker_stop()
-    return jsonify({"ok": True})
-
-
-@app.post("/api/services/docker/restart")
-def docker_restart():
-    services_manager.docker_restart()
     return jsonify({"ok": True})
 
 
