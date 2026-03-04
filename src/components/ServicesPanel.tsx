@@ -18,6 +18,8 @@ export interface ServicesStatus {
   mac_api:        'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
   db_connection:  'connected' | 'disconnected' | 'checking';
   mac_api_health: 'up' | 'down' | 'unknown';
+  dnsmasq_status: 'active' | 'inactive' | 'unknown';
+  nginx_status:   'active' | 'inactive' | 'unknown';
 }
 
 interface Props {
@@ -323,10 +325,31 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus }:
             </>
           )}
 
-          {/* DHCP / NGINX tabs: logs only */}
-          {(activeTab === 'dhcp' || activeTab === 'nginx') && (
-            <ServiceLogPane lines={logs[activeTab]} />
-          )}
+          {/* DHCP / NGINX tabs: status indicator + logs */}
+          {(activeTab === 'dhcp' || activeTab === 'nginx') && (() => {
+            const svcKey   = activeTab === 'dhcp' ? 'dnsmasq_status' : 'nginx_status';
+            const svcName  = activeTab === 'dhcp' ? 'dnsmasq' : 'nginx';
+            const svcState = servicesStatus[svcKey];
+            return (
+              <>
+                <div className={`svc-db-detail svc-db-detail--${
+                  svcState === 'active'   ? 'connected'    :
+                  svcState === 'inactive' ? 'disconnected' :
+                                           'checking'
+                }`}>
+                  <span className="svc-db-detail__dot" />
+                  <span>
+                    {svcState === 'active'
+                      ? `${svcName} actif (systemctl is-active: active)`
+                      : svcState === 'inactive'
+                      ? `${svcName} inactif (systemctl is-active: inactive)`
+                      : `${svcName} — état inconnu`}
+                  </span>
+                </div>
+                <ServiceLogPane lines={logs[activeTab]} />
+              </>
+            );
+          })()}
 
         </div>
       </aside>

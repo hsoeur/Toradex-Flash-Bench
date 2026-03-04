@@ -32,9 +32,10 @@ logger = logging.getLogger("FlashBench.Services")
 # Types
 # ──────────────────────────────────────────────────
 
-DbState        = Literal["connected", "disconnected", "checking"]
-ApiHealthState = Literal["up", "down", "unknown"]
-MacApiState    = Literal["running", "stopped", "starting", "stopping", "restarting"]
+DbState             = Literal["connected", "disconnected", "checking"]
+ApiHealthState      = Literal["up", "down", "unknown"]
+MacApiState         = Literal["running", "stopped", "starting", "stopping", "restarting"]
+SystemdServiceState = Literal["active", "inactive", "unknown"]
 
 StatusChangedCallback = Callable[[dict], None]
 ServiceLogCallback    = Callable[[dict], None]   # {ts, level, message, source}
@@ -46,15 +47,19 @@ ServiceLogCallback    = Callable[[dict], None]   # {ts, level, message, source}
 
 class ServicesStatus:
     def __init__(self) -> None:
-        self.mac_api:        MacApiState    = "stopped"
-        self.db_connection:  DbState        = "disconnected"
-        self.mac_api_health: ApiHealthState = "unknown"
+        self.mac_api:        MacApiState         = "stopped"
+        self.db_connection:  DbState             = "disconnected"
+        self.mac_api_health: ApiHealthState      = "unknown"
+        self.dnsmasq_status: SystemdServiceState = "unknown"
+        self.nginx_status:   SystemdServiceState = "unknown"
 
     def to_dict(self) -> dict:
         return {
             "mac_api":        self.mac_api,
             "db_connection":  self.db_connection,
             "mac_api_health": self.mac_api_health,
+            "dnsmasq_status": self.dnsmasq_status,
+            "nginx_status":   self.nginx_status,
         }
 
 
@@ -88,6 +93,8 @@ class ServicesManager:
     MAC_API_HEALTH_URL     = "http://127.0.0.1:8000/health"
     MAC_API_CHECK_INTERVAL = 5    # seconds
 
+    SYSTEMD_CHECK_INTERVAL = 10   # seconds
+
     MAC_API_CMD = [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
 
     def __init__(
@@ -109,6 +116,18 @@ class ServicesManager:
         self._mac_api_thread = threading.Thread(
             target=self._mac_api_health_loop, name="MacApiHealthCheck", daemon=True
         )
+        self._dnsmasq_thread = threading.Thread(
+            target=self._dnsmasq_health_loop, name="DnsmasqHealthCheck", daemon=True
+        )
+        self._nginx_thread = threading.Thread(
+            target=self._nginx_health_loop, name="NginxHealthCheck", daemon=True
+        )
+        self._dnsmasq_log_thread = threading.Thread(
+            target=self._dnsmasq_log_stream_loop, name="DnsmasqLogStream", daemon=True
+        )
+        self._nginx_log_thread = threading.Thread(
+            target=self._nginx_log_stream_loop, name="NginxLogStream", daemon=True
+        )
 
     # ── Public API ────────────────────────────────
 
@@ -116,6 +135,10 @@ class ServicesManager:
         """Start background monitoring threads."""
         self._db_thread.start()
         self._mac_api_thread.start()
+        self._dnsmasq_thread.start()
+        self._nginx_thread.start()
+        self._dnsmasq_log_thread.start()
+        self._nginx_log_thread.start()
         logger.info("ServicesManager monitoring started")
 
     def get_status(self) -> dict:
@@ -264,6 +287,78 @@ class ServicesManager:
             self._status.mac_api_health = new_health
         if changed:
             self._emit_status()
+
+    # ── dnsmasq (DHCP/DNS) monitoring ─────────────
+
+    def _dnsmasq_health_loop(self) -> None:
+        while True:
+            self._check_systemd_service("dnsmasq", "dnsmasq_status", "dhcp")
+            time.sleep(self.SYSTEMD_CHECK_INTERVAL)
+
+    # ── nginx monitoring ───────────────────────────
+
+    def _nginx_health_loop(self) -> None:
+        while True:
+            self._check_systemd_service("nginx", "nginx_status", "nginx")
+            time.sleep(self.SYSTEMD_CHECK_INTERVAL)
+
+    def _check_systemd_service(self, service: str, status_attr: str, log_source: str) -> None:
+        """Run 'systemctl is-active <service>' and update the matching status field."""
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-active", service],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            output = result.stdout.strip()
+            new_state: SystemdServiceState = "active" if output == "active" else "inactive"
+        except Exception:
+            new_state = "unknown"
+
+        with self._lock:
+            changed = getattr(self._status, status_attr) != new_state
+            setattr(self._status, status_attr, new_state)
+        if changed:
+            self._emit_status()
+
+    # ── dnsmasq / nginx log streaming ─────────────────────────────
+
+    def _dnsmasq_log_stream_loop(self) -> None:
+        self._stream_command_logs(
+            cmd=["sudo", "journalctl", "-u", "dnsmasq", "-f", "--no-pager", "-n", "50", "-o", "short"],
+            source="dhcp",
+        )
+
+    def _nginx_log_stream_loop(self) -> None:
+        self._stream_command_logs(
+            cmd=["sudo", "tail", "-n", "50", "-f", "/var/log/nginx/access.log"],
+            source="nginx",
+        )
+
+    def _stream_command_logs(self, cmd: list, source: str) -> None:
+        """
+        Runs *cmd* and emits each output line as a log entry for *source*.
+        Automatically restarts after a 5-second pause when the process exits.
+        """
+        while True:
+            try:
+                self._log("info", f"Démarrage du flux : {' '.join(cmd)}", source)
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                )
+                for raw in proc.stdout:
+                    line = raw.rstrip()
+                    if line:
+                        self._log("info", line, source)
+                rc = proc.wait()
+                self._log("warning", f"Flux terminé (code {rc}), redémarrage dans 5 s…", source)
+            except Exception:
+                self._log("error", f"Erreur flux ({source}): {traceback.format_exc()}", source)
+            time.sleep(5)
 
     # ── Helpers ───────────────────────────────────
 
