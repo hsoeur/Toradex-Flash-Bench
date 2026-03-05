@@ -28,10 +28,11 @@ const DEFAULT_MONITOR_STATUS: MonitorStatus = {
 
 interface Props {
   operator: string;
+  orderNumber: string;
   onLogout: () => void;
 }
 
-export default function FlashDashboard({ operator, onLogout }: Props) {
+export default function FlashDashboard({ operator, orderNumber, onLogout }: Props) {
   const [modules, setModules] = useState<ModulesMap>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -76,7 +77,18 @@ export default function FlashDashboard({ operator, onLogout }: Props) {
           </div>
           <div>
             <h1 className="dashboard__title">Verdin AM62 Flash Monitor</h1>
-            <p className="dashboard__subtitle">Surveillance du flashage en temps réel</p>
+            <p className="dashboard__subtitle">
+              Surveillance du flashage en temps réel
+              <span className="dashboard__order-badge">
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none">
+                  <rect x="1" y="1" width="4" height="14" rx="0.5" fill="currentColor"/>
+                  <rect x="6" y="1" width="2" height="14" rx="0.5" fill="currentColor"/>
+                  <rect x="9" y="1" width="4" height="14" rx="0.5" fill="currentColor"/>
+                  <rect x="14" y="1" width="1" height="14" rx="0.5" fill="currentColor"/>
+                </svg>
+                OF&nbsp;{orderNumber}
+              </span>
+            </p>
           </div>
         </div>
 
