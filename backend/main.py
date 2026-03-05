@@ -16,6 +16,7 @@ from __future__ import annotations
 import logging
 import os
 import traceback
+from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 
 from flask import Flask, jsonify
@@ -34,38 +35,84 @@ LOG_DIR      = os.path.join(os.path.dirname(__file__), "..", "logs")
 FLASK_HOST   = "0.0.0.0"
 FLASK_PORT   = 5001
 DEBUG        = False
+LOG_RETENTION_DAYS = 30
 
 # Working directory for docker-compose / uvicorn (project root by default)
 WORK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 # ══════════════════════════════════════════════════
-# File logger (rotates daily, keeps 7 days)
+# Helpers — daily log files named YYYY-MM-DD_<stem>.log
 # ══════════════════════════════════════════════════
 
 os.makedirs(LOG_DIR, exist_ok=True)
 
-_file_handler = TimedRotatingFileHandler(
-    os.path.join(LOG_DIR, "flashbench.log"),
-    when="midnight",
-    interval=1,
-    backupCount=7,
-    encoding="utf-8",
-)
-_file_handler.setFormatter(
-    logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
-)
 
-# Console handler (visible in the terminal where main.py runs)
+def _make_daily_handler(stem: str, level: int = logging.DEBUG) -> TimedRotatingFileHandler:
+    """
+    Create a TimedRotatingFileHandler that:
+      - writes today's logs to  logs/YYYY-MM-DD_<stem>.log
+      - rotates at midnight, keeping LOG_RETENTION_DAYS files
+      - names rotated backups  logs/YYYY-MM-DD_<stem>.log  (date prefix, not suffix)
+    """
+    today    = datetime.now().strftime("%Y-%m-%d")
+    filepath = os.path.join(LOG_DIR, f"{today}_{stem}.log")
+
+    handler = TimedRotatingFileHandler(
+        filepath,
+        when="midnight",
+        interval=1,
+        backupCount=LOG_RETENTION_DAYS,
+        encoding="utf-8",
+    )
+
+    # Rename rotated files to  YYYY-MM-DD_<stem>.log  instead of  <stem>.log.YYYY-MM-DD
+    def _namer(default_name: str) -> str:
+        # default_name = /path/YYYY-MM-DD_stem.log.YYYY-MM-DD
+        base, _sep, date_suffix = default_name.rpartition(".")
+        log_dir  = os.path.dirname(base)
+        # strip old date prefix from the base filename, keep only the stem part
+        basename = os.path.basename(base)
+        # basename looks like "YYYY-MM-DD_stem.log" — extract stem
+        parts = basename.split("_", 1)
+        pure_stem = parts[1] if len(parts) == 2 else basename
+        return os.path.join(log_dir, f"{date_suffix}_{pure_stem}")
+
+    handler.namer = _namer
+    handler.setLevel(level)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s | %(levelname)-8s | %(name)s | %(message)s")
+    )
+    return handler
+
+
+# ══════════════════════════════════════════════════
+# Loggers setup
+# ══════════════════════════════════════════════════
+
+# — Console (INFO+, visible dans le terminal)
 _console_handler = logging.StreamHandler()
+_console_handler.setLevel(logging.INFO)
 _console_handler.setFormatter(
     logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s")
 )
 
-# Root logger for everything under "FlashBench.*"
+# — Fichier principal : tout (DEBUG+), tous les modules FlashBench
+_main_file_handler = _make_daily_handler("flashbench", logging.DEBUG)
+
+# Root logger
 _root_logger = logging.getLogger("FlashBench")
-_root_logger.setLevel(logging.INFO)
-_root_logger.addHandler(_file_handler)
+_root_logger.setLevel(logging.DEBUG)
+_root_logger.addHandler(_main_file_handler)
 _root_logger.addHandler(_console_handler)
+
+# — Fichier dédié aux events cartes (register / progress / error)
+#   Uniquement le logger FlashBench.Monitor
+_events_file_handler = _make_daily_handler("flash_events", logging.INFO)
+_events_file_handler.setFormatter(
+    logging.Formatter("%(asctime)s | %(levelname)-8s | %(message)s")
+)
+_monitor_logger = logging.getLogger("FlashBench.Monitor")
+_monitor_logger.addHandler(_events_file_handler)
 
 logger = logging.getLogger("FlashBench.Main")
 

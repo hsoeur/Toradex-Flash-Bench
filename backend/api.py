@@ -38,20 +38,36 @@ def health():
 # =========================
 # CONFIG LOGS
 # =========================
+# CONFIG LOGS
+# =========================
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
 
-log_handler = TimedRotatingFileHandler(
-    filename=f"{LOG_DIR}/api.log",
-    when="midnight",
-    interval=1,
-    backupCount=30
-)
+def _make_api_log_handler() -> TimedRotatingFileHandler:
+    from datetime import datetime
+    today    = datetime.now().strftime("%Y-%m-%d")
+    filepath = os.path.join(LOG_DIR, f"{today}_api.log")
+    handler  = TimedRotatingFileHandler(
+        filename=filepath,
+        when="midnight",
+        interval=1,
+        backupCount=30,
+        encoding="utf-8",
+    )
+    def _namer(default_name: str) -> str:
+        base, _sep, date_suffix = default_name.rpartition(".")
+        log_dir  = os.path.dirname(base)
+        basename = os.path.basename(base)
+        parts    = basename.split("_", 1)
+        pure_stem = parts[1] if len(parts) == 2 else basename
+        return os.path.join(log_dir, f"{date_suffix}_{pure_stem}")
+    handler.namer = _namer
+    return handler
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    handlers=[log_handler]
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    handlers=[_make_api_log_handler()],
 )
 
 logger = logging.getLogger(__name__)
