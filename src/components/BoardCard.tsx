@@ -59,7 +59,10 @@ export default function BoardCard({ ip, data }: Props) {
   return (
     <div className={`board-card board-card--${status}`}>
       <div className="board-card__header">
-        <span className="board-card__serial">{serial}</span>
+        <div className="board-card__serial-group">
+          <span className="board-card__serial-label">N° de série</span>
+          <span className="board-card__serial">{serial}</span>
+        </div>
         <span className={`board-card__badge board-card__badge--${status}`}>
           {STATUS_LABEL[status] ?? status}
         </span>

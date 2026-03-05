@@ -258,6 +258,21 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; }
   gap: 8px;
 }
 
+.board-card__serial-group {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.board-card__serial-label {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
 .board-card__serial {
   font-size: 1rem;
   font-weight: 700;
@@ -267,6 +282,12 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.board-card__value--serial {
+  font-family: 'Courier New', monospace;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .board-card__badge {
