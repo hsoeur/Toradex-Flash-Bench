@@ -1,4 +1,5 @@
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import mysql.connector
 from mysql.connector import Error
@@ -7,6 +8,13 @@ from logging.handlers import TimedRotatingFileHandler
 import os
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # =========================
@@ -217,6 +225,54 @@ def save_programmed_board(data: ProgrammedBoardRequest):
     except Error as e:
         conn.rollback()
         logger.error(f"Database error in /programmed-board: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+    finally:
+        if 'conn' in locals() and conn.is_connected():
+            cursor.close()
+            conn.close()
+
+
+# =========================
+# LIST TODAY'S BOARDS
+# =========================
+@app.get("/programmed-boards/today")
+def get_today_boards():
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor(dictionary=True)
+
+        cursor.execute("""
+            SELECT
+                Id,
+                SerialNumber,
+                ProductId,
+                BoardRevision,
+                FactoryMac,
+                ClientMac,
+                ProductionOrder,
+                OperatorId,
+                ImageFolder,
+                IpBeforeReboot,
+                ProgrammingStatus,
+                ProgrammedAt
+            FROM ProgrammedBoards
+            WHERE DATE(ProgrammedAt) = CURDATE()
+            ORDER BY ProgrammedAt DESC
+        """)
+
+        boards = cursor.fetchall()
+
+        logger.info(f"Today's boards requested -> count={len(boards)}")
+
+        return {
+            "date": __import__("datetime").date.today().isoformat(),
+            "count": len(boards),
+            "boards": boards
+        }
+
+    except Error as e:
+        logger.error(f"Database error in /programmed-boards/today: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
     finally:

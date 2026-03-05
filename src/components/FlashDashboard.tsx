@@ -4,6 +4,7 @@ import type { ModulesMap } from '../types/board';
 import BoardCard from './BoardCard';
 import ConsolePanel from './ConsolePanel';
 import ServicesPanel, { type ServicesStatus, type MonitorStatus } from './ServicesPanel';
+import TraceabilityPanel from './TraceabilityPanel';
 
 const BACKEND_URL = 'http://localhost:5001';
 
@@ -30,6 +31,7 @@ export default function FlashDashboard() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus>(DEFAULT_SERVICES_STATUS);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>(DEFAULT_MONITOR_STATUS);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -99,6 +101,21 @@ export default function FlashDashboard() {
               <path d="M9 11h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
             </svg>
             Console
+          </button>
+
+          {/* Traceability button */}
+          <button
+            className={`dashboard__console-btn ${traceOpen ? 'dashboard__console-btn--active' : ''}`}
+            onClick={() => setTraceOpen(o => !o)}
+            title="Traçabilité des cartes flashées aujourd'hui"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="2" y="1" width="10" height="13" rx="1.5" stroke="currentColor" strokeWidth="1.3"/>
+              <path d="M4 5h6M4 8h6M4 11h4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
+              <circle cx="13" cy="12" r="2.5" fill="currentColor" opacity="0.9"/>
+              <path d="M12.3 12l.5.5.9-.9" stroke="white" strokeWidth="1" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Traçabilité
           </button>
 
           {/* Services button */}
@@ -178,6 +195,12 @@ export default function FlashDashboard() {
         onClose={() => setServicesOpen(false)}
         servicesStatus={servicesStatus}
         monitorStatus={monitorStatus}
+      />
+
+      {/* Traceability slide-in panel (right) */}
+      <TraceabilityPanel
+        open={traceOpen}
+        onClose={() => setTraceOpen(false)}
       />
     </div>
   );
