@@ -26,7 +26,12 @@ const DEFAULT_MONITOR_STATUS: MonitorStatus = {
   port:        5000,
 };
 
-export default function FlashDashboard() {
+interface Props {
+  operator: string;
+  onLogout: () => void;
+}
+
+export default function FlashDashboard({ operator, onLogout }: Props) {
   const [modules, setModules] = useState<ModulesMap>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -153,6 +158,25 @@ export default function FlashDashboard() {
                 ? 'Connexion...'
                 : 'Backend déconnecté'}
             </span>
+          </div>
+
+          {/* Operator chip */}
+          <div className="dashboard__operator">
+            <span className="dashboard__operator-avatar">
+              {operator.charAt(0).toUpperCase()}
+            </span>
+            <span className="dashboard__operator-name">{operator}</span>
+            <button
+              className="dashboard__operator-logout"
+              onClick={onLogout}
+              title="Changer d'opérateur"
+            >
+              <svg width="13" height="13" viewBox="0 0 16 16" fill="none">
+                <path d="M6 2H3a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                <path d="M10 11l3-3-3-3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M13 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+            </button>
           </div>
         </div>
       </header>
