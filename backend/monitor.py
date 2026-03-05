@@ -144,6 +144,36 @@ class ModuleStore:
             )
         self._notify()
 
+    def handle_event(self, ip: str, raw_data: str) -> None:
+        """
+        Called by SerialListener when the received data looks like a
+        pipe-delimited traceability/post-flash event rather than a plain
+        serial number.  We do NOT reset the board state here.
+        Instead, TRACEABILITY_OK and END/Rebooting promote the board to
+        'done' so the card turns green.
+        """
+        with self._lock:
+            if ip not in self._modules:
+                # Board not yet known — ignore orphaned events
+                logger.warning("Event received for unknown IP %s — ignored", ip)
+                return
+
+            mod = self._modules[ip]
+
+            if "TRACEABILITY_OK" in raw_data or ("END" in raw_data and "Rebooting" in raw_data):
+                mod.status   = "done"
+                mod.progress = 100
+                logger.info(
+                    "Board flash confirmed done | serial=%s | ip=%s | event=%s",
+                    mod.serial, ip, raw_data.strip(),
+                )
+            else:
+                logger.info(
+                    "Board event | serial=%s | ip=%s | event=%s",
+                    mod.serial, ip, raw_data.strip(),
+                )
+        self._notify()
+
     def mark_error(self, ip: str, message: str = "") -> None:
         with self._lock:
             if ip in self._modules:
@@ -272,7 +302,12 @@ class SerialListener:
             try:
                 data = conn.recv(1024).decode("utf-8", errors="replace").strip()
                 if data:
-                    self.store.register_board(ip=addr[0], serial=data)
+                    if "|" in data:
+                        # Pipe-delimited traceability / post-flash event
+                        self.store.handle_event(ip=addr[0], raw_data=data)
+                    else:
+                        # Plain serial number — new board or board reset
+                        self.store.register_board(ip=addr[0], serial=data)
             except Exception:
                 logger.error(
                     "Exception handling client %s:\n%s", addr[0], traceback.format_exc()
