@@ -13,13 +13,14 @@ Run with:
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import traceback
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request as flask_request
 from flask_cors import CORS
 from flask_socketio import SocketIO
 
@@ -39,6 +40,10 @@ LOG_RETENTION_DAYS = 30
 
 # Working directory for docker-compose / uvicorn (project root by default)
 WORK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Nginx web root where Tezi images live
+IMAGE_ROOT = "/var/www/html"
+IMAGE_LIST_FILE = os.path.join(IMAGE_ROOT, "image_list.json")
 
 # ══════════════════════════════════════════════════
 # Helpers — daily log files named YYYY-MM-DD_<stem>.log
@@ -223,6 +228,31 @@ def handle_connect(auth=None):
     sio_emit("services_status", services_manager.get_status())
     sio_emit("monitor_status",  serial_listener.get_status())
 
+    # Send current images list
+    try:
+        images_paths = _read_image_list()
+        images = []
+        for rel_path in images_paths:
+            try:
+                img = _read_image_json(rel_path)
+                folder = rel_path.rsplit("/", 1)[0] if "/" in rel_path else rel_path
+                autoinstall_raw = img.get("autoinstall", False)
+                autoinstall = autoinstall_raw is True or autoinstall_raw == "true"
+                images.append({
+                    "path":         rel_path,
+                    "folder":       folder,
+                    "name":         img.get("name", folder),
+                    "description":  img.get("description", ""),
+                    "version":      img.get("version", ""),
+                    "release_date": img.get("release_date", ""),
+                    "autoinstall":  autoinstall,
+                })
+            except Exception:
+                pass
+        sio_emit("images_update", {"images": images})
+    except Exception:
+        logger.warning("Could not send images on connect: %s", traceback.format_exc())
+
 
 @socketio.on("disconnect")
 def handle_disconnect():
@@ -262,6 +292,104 @@ def get_status():
         "services":        services_manager.get_status(),
         "serial_listener": serial_listener.get_status(),
     })
+
+
+# ══════════════════════════════════════════════════
+# REST routes — Tezi image autoinstall switcher
+# ══════════════════════════════════════════════════
+
+
+def _read_image_list() -> list[str]:
+    """Return list of relative image.json paths from image_list.json."""
+    with open(IMAGE_LIST_FILE, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("images", [])
+
+
+def _read_image_json(relative_path: str) -> dict:
+    """Read and return a single image.json."""
+    full_path = os.path.join(IMAGE_ROOT, relative_path)
+    with open(full_path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _write_image_json(relative_path: str, data: dict) -> None:
+    """Write data back to an image.json file."""
+    full_path = os.path.join(IMAGE_ROOT, relative_path)
+    with open(full_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4, ensure_ascii=False)
+        f.write("\n")
+
+
+@app.get("/api/images")
+def get_images():
+    """List all Tezi images with their autoinstall status."""
+    try:
+        paths = _read_image_list()
+        images = []
+        for rel_path in paths:
+            try:
+                img = _read_image_json(rel_path)
+                # Derive folder name from path (e.g. "Verdin-AM62_DEV/image.json" → "Verdin-AM62_DEV")
+                folder = rel_path.rsplit("/", 1)[0] if "/" in rel_path else rel_path
+                autoinstall_raw = img.get("autoinstall", False)
+                autoinstall = autoinstall_raw is True or autoinstall_raw == "true"
+                images.append({
+                    "path":         rel_path,
+                    "folder":       folder,
+                    "name":         img.get("name", folder),
+                    "description":  img.get("description", ""),
+                    "version":      img.get("version", ""),
+                    "release_date": img.get("release_date", ""),
+                    "autoinstall":  autoinstall,
+                })
+            except Exception:
+                logger.warning("Cannot read image %s:\n%s", rel_path, traceback.format_exc())
+        return jsonify({"images": images})
+    except Exception:
+        logger.error("Error listing images:\n%s", traceback.format_exc())
+        return jsonify({"error": "Cannot read image list"}), 500
+
+
+@app.post("/api/images/autoinstall")
+def set_autoinstall():
+    """Set autoinstall=true for one image, false for all others."""
+    try:
+        body = flask_request.get_json(force=True)
+        target_path = body.get("path")
+        if not target_path:
+            return jsonify({"error": "Missing 'path'"}), 400
+
+        paths = _read_image_list()
+        if target_path not in paths:
+            return jsonify({"error": f"Unknown image path: {target_path}"}), 404
+
+        for rel_path in paths:
+            try:
+                img = _read_image_json(rel_path)
+                should_be_active = (rel_path == target_path)
+                img["autoinstall"] = should_be_active
+                _write_image_json(rel_path, img)
+                logger.info(
+                    "Image %s → autoinstall=%s",
+                    rel_path, should_be_active,
+                )
+            except Exception:
+                logger.error("Error updating %s:\n%s", rel_path, traceback.format_exc())
+
+        # Push update to all connected clients
+        try:
+            # Re-read to send fresh state
+            from flask import url_for
+            resp = get_images()
+            socketio.emit("images_update", resp.get_json())
+        except Exception:
+            logger.error("Error emitting images_update:\n%s", traceback.format_exc())
+
+        return jsonify({"ok": True})
+    except Exception:
+        logger.error("Error in set_autoinstall:\n%s", traceback.format_exc())
+        return jsonify({"error": "Internal error"}), 500
 
 
 # ══════════════════════════════════════════════════

@@ -3,6 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import type { ModulesMap } from '../types/board';
 import BoardCard from './BoardCard';
 import ConsolePanel from './ConsolePanel';
+import ImageSelectorPanel from './ImageSelectorPanel';
 import ServicesPanel, { type ServicesStatus, type MonitorStatus } from './ServicesPanel';
 import TraceabilityPanel from './TraceabilityPanel';
 
@@ -38,6 +39,7 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [imageSelectorOpen, setImageSelectorOpen] = useState(false);
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus>(DEFAULT_SERVICES_STATUS);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>(DEFAULT_MONITOR_STATUS);
   const [socket, setSocket] = useState<Socket | null>(null);
@@ -105,6 +107,20 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
             <span className="dashboard__stat-value dashboard__stat-value--waiting">{waitingCount}</span>
             <span className="dashboard__stat-label">En attente</span>
           </div>
+
+          {/* Image selector button */}
+          <button
+            className={`dashboard__console-btn ${imageSelectorOpen ? 'dashboard__console-btn--active' : ''}`}
+            onClick={() => setImageSelectorOpen(o => !o)}
+            title="Sélectionner l'image Tezi"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <rect x="1" y="3" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.3" />
+              <path d="M4 7h8M4 10h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+              <circle cx="12" cy="10" r="1.5" fill="currentColor" />
+            </svg>
+            Image
+          </button>
 
           {/* Console button */}
           <button
@@ -237,6 +253,13 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
       <TraceabilityPanel
         open={traceOpen}
         onClose={() => setTraceOpen(false)}
+      />
+
+      {/* Image selector slide-in panel (right) */}
+      <ImageSelectorPanel
+        socket={socket}
+        open={imageSelectorOpen}
+        onClose={() => setImageSelectorOpen(false)}
       />
     </div>
   );
