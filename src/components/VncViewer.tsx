@@ -40,7 +40,7 @@ export default function VncViewer({ ip, serial, wsPort }: Props) {
     rfb.resizeSession = false;
     rfb.viewOnly = true;        // read-only — just monitoring
     rfb.focusOnClick = false;
-    rfb.background = '#0f172a';
+    rfb.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#101316';
 
     rfb.addEventListener('connect', () => {
       setStatus('connected');

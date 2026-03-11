@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import './App.css';
 import FlashDashboard from './components/FlashDashboard';
 import LoginScreen from './components/LoginScreen';
@@ -6,6 +6,9 @@ import ScanOrderScreen from './components/ScanOrderScreen';
 
 const SESSION_KEY = 'flashbench_operator';
 const ORDER_KEY   = 'flashbench_order';
+const THEME_KEY   = 'flashbench_theme';
+
+export type Theme = 'dark' | 'light';
 
 function App() {
   const [operator, setOperator] = useState<string | null>(
@@ -14,6 +17,17 @@ function App() {
   const [orderNumber, setOrderNumber] = useState<string | null>(
     () => sessionStorage.getItem(ORDER_KEY)
   );
+  const [theme, setTheme] = useState<Theme>(
+    () => (localStorage.getItem(THEME_KEY) as Theme) || 'dark'
+  );
+
+  // Apply data-theme to <html> on mount and when changed
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem(THEME_KEY, theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme(t => (t === 'dark' ? 'light' : 'dark'));
 
   const handleSelectOperator = (op: string) => {
     sessionStorage.setItem(SESSION_KEY, op);
@@ -40,7 +54,7 @@ function App() {
   };
 
   if (!operator) {
-    return <LoginScreen onSelect={handleSelectOperator} />;
+    return <LoginScreen onSelect={handleSelectOperator} theme={theme} onToggleTheme={toggleTheme} />;
   }
 
   if (!orderNumber) {
@@ -49,6 +63,8 @@ function App() {
         operator={operator}
         onConfirm={handleConfirmOrder}
         onBack={handleBackToOperator}
+        theme={theme}
+        onToggleTheme={toggleTheme}
       />
     );
   }
@@ -58,6 +74,8 @@ function App() {
       operator={operator}
       orderNumber={orderNumber}
       onLogout={handleLogout}
+      theme={theme}
+      onToggleTheme={toggleTheme}
     />
   );
 }
