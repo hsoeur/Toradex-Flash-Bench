@@ -24,6 +24,9 @@ dist-ssr
 *.sln
 *.sw?
 
+# Vendor libraries
+vendor/
+
 # Python virtual environment
 backend/.venv/
 

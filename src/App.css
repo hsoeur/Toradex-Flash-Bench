@@ -1753,3 +1753,150 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; }
   color: var(--text-muted);
   flex-shrink: 0;
 }
+
+/* ==========================================
+   VNC SECTION
+   ========================================== */
+.vnc-section {
+  margin-top: 28px;
+}
+
+.vnc-section__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.vnc-section__title svg {
+  color: var(--blue);
+  flex-shrink: 0;
+}
+
+/* ==========================================
+   VNC GRID
+   ========================================== */
+.vnc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
+  gap: 16px;
+}
+
+/* ==========================================
+   VNC VIEWER CARD
+   ========================================== */
+.vnc-viewer {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.vnc-viewer__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  gap: 12px;
+}
+
+.vnc-viewer__info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.vnc-viewer__serial {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+.vnc-viewer__ip {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.vnc-viewer__status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  white-space: nowrap;
+  padding: 3px 10px;
+  border-radius: 20px;
+}
+
+.vnc-viewer__status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.vnc-viewer__status--connecting {
+  color: var(--yellow);
+  background: var(--yellow-dim);
+}
+.vnc-viewer__status--connecting .vnc-viewer__status-dot {
+  background: var(--yellow);
+  animation: pulse-dot 1.2s infinite;
+}
+
+.vnc-viewer__status--connected {
+  color: var(--green);
+  background: var(--green-dim);
+}
+.vnc-viewer__status--connected .vnc-viewer__status-dot {
+  background: var(--green);
+}
+
+.vnc-viewer__status--disconnected {
+  color: var(--text-muted);
+  background: rgba(100, 116, 139, 0.12);
+}
+.vnc-viewer__status--disconnected .vnc-viewer__status-dot {
+  background: var(--text-muted);
+}
+
+.vnc-viewer__status--error {
+  color: var(--red);
+  background: var(--red-dim);
+}
+.vnc-viewer__status--error .vnc-viewer__status-dot {
+  background: var(--red);
+}
+
+.vnc-viewer__canvas {
+  width: 100%;
+  height: 360px;
+  background: #0f172a;
+  position: relative;
+}
+
+/* noVNC injects a canvas inside our container — make it fill */
+.vnc-viewer__canvas canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}

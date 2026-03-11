@@ -27,6 +27,7 @@ from flask_socketio import SocketIO
 from log_handler import ServiceLogBuffer, SocketIOLogHandler
 from monitor import ModuleStore, NginxMonitor, SerialListener
 from services import ServicesManager
+from vnc_proxy import VncProxyManager
 
 # ══════════════════════════════════════════════════
 # Config
@@ -173,6 +174,13 @@ def _on_modules_changed(snapshot: dict) -> None:
 
 module_store.subscribe(_on_modules_changed)
 
+# ══════════════════════════════════════════════════
+# VNC proxy (websockify)
+# ══════════════════════════════════════════════════
+
+vnc_proxy = VncProxyManager()
+module_store.subscribe(vnc_proxy.on_modules_changed)
+
 def _on_serial_listener_status_changed(_status: str) -> None:
     try:
         socketio.emit("monitor_status", serial_listener.get_status())
@@ -227,6 +235,7 @@ def handle_connect(auth=None):
     sio_emit("modules_update",  module_store.snapshot())
     sio_emit("services_status", services_manager.get_status())
     sio_emit("monitor_status",  serial_listener.get_status())
+    sio_emit("vnc_config",      {"ws_port": vnc_proxy.port})
 
     # Send current images list
     try:
@@ -291,6 +300,7 @@ def get_status():
         "modules":         module_store.snapshot(),
         "services":        services_manager.get_status(),
         "serial_listener": serial_listener.get_status(),
+        "vnc_ws_port":     vnc_proxy.port,
     })
 
 
@@ -402,6 +412,7 @@ def main() -> None:
     logger.info("FlashBench Monitor backend starting")
     logger.info("  Flask-SocketIO : http://%s:%d", FLASK_HOST, FLASK_PORT)
     logger.info("  Serial TCP     : port %d", 5000)
+    logger.info("  VNC proxy      : ws://0.0.0.0:%d", vnc_proxy.port)
     logger.info("  Nginx log      : /var/log/nginx/access.log")
     logger.info("═" * 60)
 
@@ -409,6 +420,7 @@ def main() -> None:
     serial_listener.start()
     nginx_monitor.start()
     services_manager.start()
+    vnc_proxy.start()
 
     # Start Flask-SocketIO (blocking)
     socketio.run(

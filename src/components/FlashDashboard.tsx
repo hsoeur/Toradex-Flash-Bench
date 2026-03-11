@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 import type { ModulesMap } from '../types/board';
-import BoardCard from './BoardCard';
 import ConsolePanel from './ConsolePanel';
 import ImageSelectorPanel from './ImageSelectorPanel';
 import ServicesPanel, { type ServicesStatus, type MonitorStatus } from './ServicesPanel';
 import TraceabilityPanel from './TraceabilityPanel';
+import VncViewer from './VncViewer';
 
 const BACKEND_URL = 'http://localhost:5001';
 
@@ -43,6 +43,7 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
   const [servicesStatus, setServicesStatus] = useState<ServicesStatus>(DEFAULT_SERVICES_STATUS);
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>(DEFAULT_MONITOR_STATUS);
   const [socket, setSocket] = useState<Socket | null>(null);
+  const [vncWsPort, setVncWsPort] = useState<number>(6080);
 
   useEffect(() => {
     const s = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
@@ -54,6 +55,7 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
     s.on('modules_update',  (data: ModulesMap)      => setModules({ ...data }));
     s.on('services_status', (data: ServicesStatus)  => setServicesStatus(data));
     s.on('monitor_status',  (data: MonitorStatus)   => setMonitorStatus(data));
+    s.on('vnc_config',      (data: { ws_port: number }) => setVncWsPort(data.ws_port));
 
     return () => { s.disconnect(); };
   }, []);
@@ -62,6 +64,7 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
   const doneCount     = boardEntries.filter(([, d]) => d.status === 'done').length;
   const flashingCount = boardEntries.filter(([, d]) => d.status === 'flashing').length;
   const waitingCount  = boardEntries.filter(([, d]) => d.status === 'waiting').length;
+  const flashingBoards = boardEntries.filter(([, d]) => d.status === 'flashing');
 
   return (
     <div className="dashboard">
@@ -224,10 +227,27 @@ export default function FlashDashboard({ operator, orderNumber, onLogout }: Prop
               En attente de connexion des modules Verdin AM62…
             </p>
           </div>
+        ) : flashingBoards.length === 0 ? (
+          <div className="dashboard__empty">
+            <svg width="64" height="64" viewBox="0 0 64 64" fill="none" opacity="0.4">
+              <rect x="8" y="14" width="48" height="36" rx="4" stroke="currentColor" strokeWidth="2" />
+              <path d="M20 50v4M44 50v4M14 54h36" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+              <path d="M24 32h16M32 24v16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+            <p className="dashboard__empty-title">{boardEntries.length} carte{boardEntries.length > 1 ? 's' : ''} détectée{boardEntries.length > 1 ? 's' : ''}</p>
+            <p className="dashboard__empty-sub">
+              Aucun flashage en cours — les écrans VNC apparaîtront automatiquement
+            </p>
+          </div>
         ) : (
-          <div className="board-grid">
-            {boardEntries.map(([ip, data]) => (
-              <BoardCard key={ip} ip={ip} data={data} />
+          <div className="vnc-grid">
+            {flashingBoards.map(([ip, data]) => (
+              <VncViewer
+                key={ip}
+                ip={ip}
+                serial={data.serial}
+                wsPort={vncWsPort}
+              />
             ))}
           </div>
         )}
