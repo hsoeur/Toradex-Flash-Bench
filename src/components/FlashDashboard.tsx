@@ -96,19 +96,6 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
         </div>
 
         <div className="dashboard__status-bar">
-          <div className="dashboard__stat">
-            <span className="dashboard__stat-value dashboard__stat-value--flashing">{flashingCount}</span>
-            <span className="dashboard__stat-label">En cours</span>
-          </div>
-          <div className="dashboard__stat">
-            <span className="dashboard__stat-value dashboard__stat-value--done">{doneCount}</span>
-            <span className="dashboard__stat-label">Terminés</span>
-          </div>
-          <div className="dashboard__stat">
-            <span className="dashboard__stat-value dashboard__stat-value--waiting">{waitingCount}</span>
-            <span className="dashboard__stat-label">En attente</span>
-          </div>
-
           {/* Image selector button */}
           <button
             className={`dashboard__console-btn ${imageSelectorOpen ? 'dashboard__console-btn--active' : ''}`}
