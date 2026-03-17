@@ -508,6 +508,17 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   color: var(--blue-light);
 }
 
+.dashboard__reset-btn {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: #f87171;
+}
+.dashboard__reset-btn:hover {
+  background: rgba(239, 68, 68, 0.18);
+  border-color: #ef4444;
+  color: #fca5a5;
+}
+
 /* ==========================================
    CONSOLE OVERLAY
    ========================================== */
@@ -1867,6 +1878,12 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.vnc-viewer--done {
+  border-color: var(--green);
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.25);
 }
 
 .vnc-viewer__header {
@@ -1912,6 +1929,29 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   border-radius: 20px;
 }
 
+.vnc-viewer__timer {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--blue, #60a5fa);
+  background: rgba(96, 165, 250, 0.10);
+  padding: 3px 10px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+
+.vnc-viewer--done .vnc-viewer__timer {
+  color: var(--green);
+  background: var(--green-dim);
+}
+
+.vnc-viewer--done .vnc-viewer__header {
+  border-bottom-color: var(--green);
+}
+
 .vnc-viewer__status-dot {
   width: 7px;
   height: 7px;
@@ -1952,9 +1992,15 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   background: var(--red);
 }
 
-.vnc-viewer__canvas {
+.vnc-viewer__canvas-wrapper {
+  position: relative;
   width: 100%;
   height: 360px;
+}
+
+.vnc-viewer__canvas {
+  width: 100%;
+  height: 100%;
   background: var(--bg);
   position: relative;
 }
@@ -1964,6 +2010,42 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   width: 100% !important;
   height: 100% !important;
   display: block;
+}
+
+/* Done overlay */
+.vnc-viewer__done-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(0, 0, 0, 0.60);
+  color: var(--green);
+  z-index: 10;
+  animation: vnc-done-fade-in 0.4s ease;
+}
+
+.vnc-viewer__done-label {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.vnc-viewer__done-time {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.08);
+  padding: 2px 12px;
+  border-radius: 12px;
+}
+
+@keyframes vnc-done-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 @keyframes pulse-dot {

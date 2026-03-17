@@ -180,7 +180,24 @@ class ModuleStore:
                 self._modules[ip].status = "error"
                 logger.error("Board error | ip=%s | %s", ip, message)
         self._notify()
+    def clear_done(self) -> None:
+        """Remove all boards whose status is 'done' (or 'error')."""
+        with self._lock:
+            to_remove = [ip for ip, mod in self._modules.items() if mod.status in ("done", "error")]
+            for ip in to_remove:
+                del self._modules[ip]
+            if to_remove:
+                logger.info("Cleared %d finished board(s): %s", len(to_remove), ", ".join(to_remove))
+        if to_remove:
+            self._notify()
 
+    def clear_all(self) -> None:
+        """Remove all boards from the store."""
+        with self._lock:
+            count = len(self._modules)
+            self._modules.clear()
+            logger.info("Cleared all %d board(s) from store", count)
+        self._notify()
     # ── read ──────────────────────────────────────
 
     def snapshot(self) -> dict:

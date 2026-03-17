@@ -270,6 +270,18 @@ def handle_disconnect():
     logger.info("Client disconnected | sid=%s", sid)
 
 
+@socketio.on("reset_boards")
+def handle_reset_boards(data=None):
+    """Clear finished (done/error) boards, or all boards if mode='all'."""
+    mode = (data or {}).get("mode", "done")
+    if mode == "all":
+        logger.info("Client requested full board reset")
+        module_store.clear_all()
+    else:
+        logger.info("Client requested clearing finished boards")
+        module_store.clear_done()
+
+
 
 # ══════════════════════════════════════════════════
 # REST routes — mac_api lifecycle control

@@ -66,9 +66,16 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
 
   const boardEntries = Object.entries(modules);
   const doneCount     = boardEntries.filter(([, d]) => d.status === 'done').length;
+  const errorCount    = boardEntries.filter(([, d]) => d.status === 'error').length;
   const flashingCount = boardEntries.filter(([, d]) => d.status === 'flashing').length;
   const waitingCount  = boardEntries.filter(([, d]) => d.status === 'waiting').length;
-  const flashingBoards = boardEntries.filter(([, d]) => d.status === 'flashing');
+  const flashingBoards = boardEntries.filter(([, d]) => d.status === 'flashing' || d.status === 'done' || d.status === 'error');
+  const finishedCount = doneCount + errorCount;
+
+  const handleResetBoards = (mode: 'done' | 'all' = 'done') => {
+    if (!socket) return;
+    socket.emit('reset_boards', { mode });
+  };
 
   return (
     <div className="dashboard">
@@ -96,6 +103,26 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
         </div>
 
         <div className="dashboard__status-bar">
+          {/* Reset button — visible when any boards exist */}
+          {boardEntries.length > 0 && (
+            <button
+              className="dashboard__console-btn dashboard__reset-btn"
+              onClick={() => handleResetBoards(finishedCount > 0 ? 'done' : 'all')}
+              title={finishedCount > 0
+                ? 'Effacer les cartes terminées et en erreur'
+                : 'Effacer toutes les cartes'
+              }
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M2 2l12 12M14 2L2 14" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>
+              {finishedCount > 0
+                ? `Réinitialiser (${finishedCount})`
+                : 'Tout effacer'
+              }
+            </button>
+          )}
+
           {/* Image selector button */}
           <button
             className={`dashboard__console-btn ${imageSelectorOpen ? 'dashboard__console-btn--active' : ''}`}
@@ -257,6 +284,8 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
                 ip={ip}
                 serial={data.serial}
                 wsPort={vncWsPort}
+                startTime={data.startTime}
+                boardStatus={data.status}
               />
             ))}
           </div>
