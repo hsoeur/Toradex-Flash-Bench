@@ -85,10 +85,10 @@ logger = logging.getLogger(__name__)
 # =========================
 DB_CONFIG = {
     "host": "127.0.0.1",
-    "port": 3307,
-    "user": "macuser",
-    "password": "macpassword",
-    "database": "mac_database"
+    "port": 3306,
+    "user": "user",
+    "password": "user",
+    "database": "db_production"
 }
 
 # =========================

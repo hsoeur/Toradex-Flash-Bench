@@ -385,10 +385,10 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
                 <span className="svc-db-detail__dot" />
                 <span>
                   {dbStatus === 'connected'
-                    ? 'MySQL localhost:3307 — connexion établie'
+                    ? 'MySQL localhost:3306 — connexion établie'
                     : dbStatus === 'checking'
                     ? 'Vérification de la connexion MySQL…'
-                    : 'MySQL localhost:3307 — injoignable'}
+                    : 'MySQL localhost:3306 — injoignable'}
                 </span>
               </div>
               <ServiceLogPane lines={logs.db} />

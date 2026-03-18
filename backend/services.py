@@ -87,7 +87,7 @@ class ServicesManager:
     """
 
     DB_HOST            = "127.0.0.1"
-    DB_PORT            = 3307
+    DB_PORT            = 3306
     DB_CHECK_INTERVAL  = 10   # seconds
 
     MAC_API_HEALTH_URL     = "http://127.0.0.1:8000/health"
