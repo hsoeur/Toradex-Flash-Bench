@@ -5,7 +5,15 @@ import type { Socket } from 'socket.io-client';
 // Types
 // ──────────────────────────────────────────────────
 
-export type ServiceSource = 'dhcp' | 'nginx' | 'mac_api' | 'db';
+export type ServiceSource = 'dhcp' | 'nginx' | 'mac_api' | 'db' | 'recovery';
+
+export interface RecoveryLogEntry {
+  ts: number;
+  level: 'info' | 'warning' | 'error';
+  message: string;
+}
+
+export type RecoveryStatus = 'idle' | 'running' | 'success' | 'error';
 
 export interface ServiceLogEntry {
   ts: number;
@@ -195,17 +203,27 @@ function ServiceLogPane({ lines }: { lines: ServiceLogEntry[] }) {
 // ──────────────────────────────────────────────────
 
 const TABS: { id: ServiceSource; label: string }[] = [
-  { id: 'dhcp',    label: 'DHCP' },
-  { id: 'nginx',   label: 'NGINX' },
-  { id: 'mac_api', label: 'MAC API' },
-  { id: 'db',      label: 'Base de données' },
+  { id: 'dhcp',     label: 'DHCP' },
+  { id: 'nginx',    label: 'NGINX' },
+  { id: 'mac_api',  label: 'MAC API' },
+  { id: 'db',       label: 'Base de données' },
+  { id: 'recovery', label: 'Récupération' },
 ];
+
+async function callRecoveryApi(path: string) {
+  try {
+    await fetch(`${BACKEND_URL}${path}`, { method: 'POST' });
+  } catch {
+    // silently ignore
+  }
+}
 
 export default function ServicesPanel({ socket, open, onClose, servicesStatus, monitorStatus }: Props) {
   const [activeTab, setActiveTab] = useState<ServiceSource>('dhcp');
   const [logs, setLogs] = useState<Record<ServiceSource, ServiceLogEntry[]>>({
-    dhcp: [], nginx: [], mac_api: [], db: [],
+    dhcp: [], nginx: [], mac_api: [], db: [], recovery: [],
   });
+  const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus>('idle');
 
   // ── socket listeners ──────────────────────────
   useEffect(() => {
@@ -213,10 +231,11 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
 
     const onHistory = (history: Record<ServiceSource, ServiceLogEntry[]>) => {
       setLogs({
-        dhcp:    history.dhcp    ?? [],
-        nginx:   history.nginx   ?? [],
-        mac_api: history.mac_api ?? [],
-        db:      history.db      ?? [],
+        dhcp:     history.dhcp    ?? [],
+        nginx:    history.nginx   ?? [],
+        mac_api:  history.mac_api ?? [],
+        db:       history.db      ?? [],
+        recovery: [],
       });
     };
 
@@ -229,18 +248,39 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
       });
     };
 
+    const onRecoveryStatus = (data: { status: RecoveryStatus }) => {
+      setRecoveryStatus(data.status);
+    };
+
+    const onRecoveryLog = (entry: RecoveryLogEntry) => {
+      setLogs(prev => {
+        const updated = [...(prev.recovery ?? []), entry as unknown as ServiceLogEntry];
+        return { ...prev, recovery: updated.length > 500 ? updated.slice(-500) : updated };
+      });
+    };
+
     socket.on('service_log_history', onHistory);
     socket.on('service_log', onLine);
+    socket.on('recovery_status', onRecoveryStatus);
+    socket.on('recovery_log', onRecoveryLog);
 
     return () => {
       socket.off('service_log_history', onHistory);
       socket.off('service_log', onLine);
+      socket.off('recovery_status', onRecoveryStatus);
+      socket.off('recovery_log', onRecoveryLog);
     };
   }, [socket]);
 
   const startMacApi   = useCallback(() => callServiceApi('/api/services/mac-api/start'),   []);
   const stopMacApi    = useCallback(() => callServiceApi('/api/services/mac-api/stop'),    []);
   const restartMacApi = useCallback(() => callServiceApi('/api/services/mac-api/restart'), []);
+
+  const startRecovery = useCallback(() => {
+    setLogs(prev => ({ ...prev, recovery: [] }));
+    callRecoveryApi('/api/recovery/start');
+  }, []);
+  const stopRecovery  = useCallback(() => callRecoveryApi('/api/recovery/stop'), []);
 
   const dbStatus = servicesStatus.db_connection;
 
@@ -380,6 +420,48 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
               </>
             );
           })()}
+
+          {/* Recovery tab */}
+          {activeTab === 'recovery' && (
+            <>
+              <div className="svc-recovery">
+                <div className="svc-recovery__info">
+                  <code className="svc-recovery__script">recovery-linux.sh</code>
+                  <span className={`svc-control__badge svc-control__badge--${
+                    recoveryStatus === 'running' ? 'running' :
+                    recoveryStatus === 'success' ? 'running' :
+                    recoveryStatus === 'error'   ? 'stopping' :
+                                                   'stopped'
+                  }`}>
+                    <span className="svc-control__dot" />
+                    {recoveryStatus === 'running' ? 'En cours…'    :
+                     recoveryStatus === 'success' ? 'Terminé ✓'    :
+                     recoveryStatus === 'error'   ? 'Erreur'       :
+                                                    'Inactif'}
+                  </span>
+                </div>
+                <div className="svc-control__actions">
+                  <button
+                    className="svc-control__btn svc-control__btn--start"
+                    onClick={startRecovery}
+                    disabled={recoveryStatus === 'running'}
+                    title="Lancer recovery-linux.sh"
+                  >
+                    ▶ Lancer
+                  </button>
+                  <button
+                    className="svc-control__btn svc-control__btn--stop"
+                    onClick={stopRecovery}
+                    disabled={recoveryStatus !== 'running'}
+                    title="Arrêter le script"
+                  >
+                    ■ Arrêter
+                  </button>
+                </div>
+              </div>
+              <ServiceLogPane lines={logs.recovery} />
+            </>
+          )}
 
         </div>
       </aside>

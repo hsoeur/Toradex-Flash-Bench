@@ -16,6 +16,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
+import threading
+import time
 import traceback
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
@@ -41,6 +44,13 @@ LOG_RETENTION_DAYS = 30
 
 # Working directory for docker-compose / uvicorn (project root by default)
 WORK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# Recovery script (Toradex Easy Installer) — update the folder name when upgrading
+RECOVERY_SCRIPT_DIR  = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..",
+                 "..", "Verdin-AM62_ToradexEasyInstaller_7.4.0+build.8")
+)
+RECOVERY_SCRIPT_PATH = os.path.join(RECOVERY_SCRIPT_DIR, "recovery-linux.sh")
 
 # Nginx web root where Tezi images live
 IMAGE_ROOT = "/var/www/html"
@@ -181,6 +191,115 @@ module_store.subscribe(_on_modules_changed)
 vnc_proxy = VncProxyManager()
 module_store.subscribe(vnc_proxy.on_modules_changed)
 
+# ══════════════════════════════════════════════════
+# Recovery script runner
+# ══════════════════════════════════════════════════
+
+
+class RecoveryRunner:
+    """Runs recovery-linux.sh in a background thread and streams output via Socket.IO."""
+
+    def __init__(self) -> None:
+        self._proc:   subprocess.Popen | None = None
+        self._thread: threading.Thread  | None = None
+        self._lock   = threading.Lock()
+        self.status  = "idle"   # idle | running | success | error
+
+    def start(self) -> bool:
+        """Start the recovery script. Returns False if already running."""
+        with self._lock:
+            if self.status == "running":
+                return False
+            self.status = "running"
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+        return True
+
+    def stop(self) -> None:
+        """Terminate the running recovery script."""
+        with self._lock:
+            proc = self._proc
+        if proc and proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+    def get_status(self) -> dict:
+        return {"status": self.status}
+
+    def _emit_log(self, line: str, level: str = "info") -> None:
+        try:
+            socketio.emit("recovery_log", {
+                "ts":      time.time(),
+                "level":   level,
+                "message": line,
+            })
+        except Exception:
+            pass
+
+    def _emit_status(self) -> None:
+        try:
+            socketio.emit("recovery_status", self.get_status())
+        except Exception:
+            pass
+
+    def _run(self) -> None:
+        self._emit_status()
+
+        if not os.path.isfile(RECOVERY_SCRIPT_PATH):
+            self._emit_log(f"Script introuvable : {RECOVERY_SCRIPT_PATH}", "error")
+            with self._lock:
+                self.status = "error"
+            self._emit_status()
+            return
+
+        self._emit_log(f"Lancement : {RECOVERY_SCRIPT_PATH}", "info")
+        proc: subprocess.Popen | None = None
+        try:
+            proc = subprocess.Popen(
+                ["bash", RECOVERY_SCRIPT_PATH],
+                cwd=RECOVERY_SCRIPT_DIR,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            with self._lock:
+                self._proc = proc
+
+            assert proc.stdout is not None
+            for raw_line in proc.stdout:
+                line = raw_line.rstrip("\n")
+                if line:
+                    self._emit_log(line)
+
+            proc.wait()
+            with self._lock:
+                self._proc = None
+
+            if proc.returncode == 0:
+                with self._lock:
+                    self.status = "success"
+                self._emit_log("Script terminé avec succès.", "info")
+            else:
+                with self._lock:
+                    self.status = "error"
+                self._emit_log(f"Script terminé avec le code {proc.returncode}.", "error")
+
+        except Exception as exc:
+            logger.error("RecoveryRunner error: %s", traceback.format_exc())
+            self._emit_log(f"Erreur : {exc}", "error")
+            with self._lock:
+                self._proc  = None
+                self.status = "error"
+
+        self._emit_status()
+
+
+recovery_runner = RecoveryRunner()
+
 def _on_serial_listener_status_changed(_status: str) -> None:
     try:
         socketio.emit("monitor_status", serial_listener.get_status())
@@ -232,10 +351,11 @@ def handle_connect(auth=None):
     sio_log_handler.on_client_connect(sid)
     service_log_buffer.on_client_connect(sid)
 
-    sio_emit("modules_update",  module_store.snapshot())
-    sio_emit("services_status", services_manager.get_status())
-    sio_emit("monitor_status",  serial_listener.get_status())
-    sio_emit("vnc_config",      {"ws_port": vnc_proxy.port})
+    sio_emit("modules_update",   module_store.snapshot())
+    sio_emit("services_status",  services_manager.get_status())
+    sio_emit("monitor_status",   serial_listener.get_status())
+    sio_emit("vnc_config",       {"ws_port": vnc_proxy.port})
+    sio_emit("recovery_status",  recovery_runner.get_status())
 
     # Send current images list
     try:
@@ -304,6 +424,30 @@ def mac_api_stop():
 def mac_api_restart():
     services_manager.mac_api_restart()
     return jsonify({"ok": True})
+
+
+# ══════════════════════════════════════════════════
+# REST routes — Recovery script
+# ══════════════════════════════════════════════════
+
+
+@app.post("/api/recovery/start")
+def recovery_start():
+    started = recovery_runner.start()
+    if not started:
+        return jsonify({"ok": False, "error": "Already running"}), 409
+    return jsonify({"ok": True})
+
+
+@app.post("/api/recovery/stop")
+def recovery_stop():
+    recovery_runner.stop()
+    return jsonify({"ok": True})
+
+
+@app.get("/api/recovery/status")
+def get_recovery_status():
+    return jsonify(recovery_runner.get_status())
 
 
 @app.get("/api/status")
