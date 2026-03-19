@@ -5,7 +5,7 @@ Starts and orchestrates:
   - Flask-SocketIO server  (port 5001)  ← consumed by the React frontend
   - SerialListener         (port 5000)  ← boards announce their serial numbers
   - NginxMonitor                        ← tails /var/log/nginx/access.log
-  - ServicesManager                     ← lifecycle for mac_api & Docker Compose
+  - ServicesManager                     ← monitors DB, dnsmasq, nginx
 
 Run with:
     python main.py
@@ -534,29 +534,6 @@ def traceability_notify():
     )
 
     return jsonify({"ok": True, "message": "Traceability recorded"})
-
-
-# ══════════════════════════════════════════════════
-# REST routes — mac_api lifecycle control
-# ══════════════════════════════════════════════════
-
-
-@app.post("/api/services/mac-api/start")
-def mac_api_start():
-    services_manager.mac_api_start()
-    return jsonify({"ok": True})
-
-
-@app.post("/api/services/mac-api/stop")
-def mac_api_stop():
-    services_manager.mac_api_stop()
-    return jsonify({"ok": True})
-
-
-@app.post("/api/services/mac-api/restart")
-def mac_api_restart():
-    services_manager.mac_api_restart()
-    return jsonify({"ok": True})
 
 
 # ══════════════════════════════════════════════════

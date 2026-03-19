@@ -2,8 +2,9 @@
 services.py — Passive monitoring of external services.
 
 Monitored items:
-  - db_connection  : TCP reachability of MySQL on 127.0.0.1:3307
-  - mac_api_health : HTTP /health endpoint of the MAC API on port 8000
+  - db_connection  : TCP reachability of MySQL on 127.0.0.1:3306
+  - dnsmasq_status : systemd unit status
+  - nginx_status   : systemd unit status
 
 This module does NOT start or stop any services — that is the responsibility
 of an external tool.
@@ -18,13 +19,10 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-import sys
 import time
 import threading
 import traceback
-from typing import Callable, Literal, Optional
-
-_BACKEND_DIR = os.path.dirname(os.path.abspath(__file__))
+from typing import Callable, Literal
 
 logger = logging.getLogger("FlashBench.Services")
 
@@ -33,8 +31,6 @@ logger = logging.getLogger("FlashBench.Services")
 # ──────────────────────────────────────────────────
 
 DbState             = Literal["connected", "disconnected", "checking"]
-ApiHealthState      = Literal["up", "down", "unknown"]
-MacApiState         = Literal["running", "stopped", "starting", "stopping", "restarting"]
 SystemdServiceState = Literal["active", "inactive", "unknown"]
 
 StatusChangedCallback = Callable[[dict], None]
@@ -47,17 +43,13 @@ ServiceLogCallback    = Callable[[dict], None]   # {ts, level, message, source}
 
 class ServicesStatus:
     def __init__(self) -> None:
-        self.mac_api:        MacApiState         = "stopped"
         self.db_connection:  DbState             = "disconnected"
-        self.mac_api_health: ApiHealthState      = "unknown"
         self.dnsmasq_status: SystemdServiceState = "unknown"
         self.nginx_status:   SystemdServiceState = "unknown"
 
     def to_dict(self) -> dict:
         return {
-            "mac_api":        self.mac_api,
             "db_connection":  self.db_connection,
-            "mac_api_health": self.mac_api_health,
             "dnsmasq_status": self.dnsmasq_status,
             "nginx_status":   self.nginx_status,
         }
@@ -82,7 +74,7 @@ def _make_log_entry(level: str, message: str, source: str) -> dict:
 
 class ServicesManager:
     """
-    Monitors the MySQL DB connection and the MAC API health endpoint.
+    Monitors the MySQL DB connection and systemd services.
     Does not manage any processes — read-only / passive.
     """
 
@@ -90,12 +82,7 @@ class ServicesManager:
     DB_PORT            = 3306
     DB_CHECK_INTERVAL  = 10   # seconds
 
-    MAC_API_HEALTH_URL     = "http://127.0.0.1:8000/health"
-    MAC_API_CHECK_INTERVAL = 5    # seconds
-
     SYSTEMD_CHECK_INTERVAL = 10   # seconds
-
-    MAC_API_CMD = [sys.executable, "-m", "uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8000"]
 
     def __init__(
         self,
@@ -108,13 +95,8 @@ class ServicesManager:
         self._status = ServicesStatus()
         self._lock   = threading.Lock()
 
-        self._mac_api_proc: Optional[subprocess.Popen] = None
-
         self._db_thread = threading.Thread(
             target=self._db_health_loop, name="DBHealthCheck", daemon=True
-        )
-        self._mac_api_thread = threading.Thread(
-            target=self._mac_api_health_loop, name="MacApiHealthCheck", daemon=True
         )
         self._dnsmasq_thread = threading.Thread(
             target=self._dnsmasq_health_loop, name="DnsmasqHealthCheck", daemon=True
@@ -132,111 +114,17 @@ class ServicesManager:
     # ── Public API ────────────────────────────────
 
     def start(self) -> None:
-        """Start background monitoring threads and auto-start the MAC API."""
+        """Start background monitoring threads."""
         self._db_thread.start()
-        self._mac_api_thread.start()
         self._dnsmasq_thread.start()
         self._nginx_thread.start()
         self._dnsmasq_log_thread.start()
         self._nginx_log_thread.start()
         logger.info("ServicesManager monitoring started")
-        self.mac_api_start()
 
     def get_status(self) -> dict:
         with self._lock:
             return self._status.to_dict()
-
-    # ── mac_api actions ───────────────────────────
-
-    def mac_api_start(self) -> None:
-        threading.Thread(target=self._mac_api_do_start, daemon=True).start()
-
-    def mac_api_stop(self) -> None:
-        threading.Thread(target=self._mac_api_do_stop, daemon=True).start()
-
-    def mac_api_restart(self) -> None:
-        threading.Thread(target=self._mac_api_do_restart, daemon=True).start()
-
-    # ── mac_api internals ─────────────────────────
-
-    def _mac_api_do_start(self) -> None:
-        with self._lock:
-            if self._status.mac_api in ("running", "starting"):
-                return
-            self._status.mac_api = "starting"
-        self._emit_status()
-        self._log("info", "Starting mac_api…", "mac_api")
-        try:
-            proc = subprocess.Popen(
-                self.MAC_API_CMD,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                cwd=_BACKEND_DIR,
-            )
-            self._mac_api_proc = proc
-            with self._lock:
-                self._status.mac_api = "running"
-            self._emit_status()
-            self._log("info", f"mac_api started (PID {proc.pid})", "mac_api")
-            threading.Thread(
-                target=self._stream_mac_api_output,
-                args=(proc,),
-                daemon=True,
-            ).start()
-        except Exception:
-            err = traceback.format_exc()
-            logger.error("Failed to start mac_api:\n%s", err)
-            self._log("error", f"Failed to start mac_api: {err}", "mac_api")
-            with self._lock:
-                self._status.mac_api = "stopped"
-            self._emit_status()
-
-    def _mac_api_do_stop(self) -> None:
-        with self._lock:
-            if self._status.mac_api in ("stopped", "stopping"):
-                return
-            self._status.mac_api = "stopping"
-        self._emit_status()
-        self._log("info", "Stopping mac_api…", "mac_api")
-        try:
-            if self._mac_api_proc and self._mac_api_proc.poll() is None:
-                self._mac_api_proc.terminate()
-                self._mac_api_proc.wait(timeout=10)
-        except Exception:
-            logger.error("Error stopping mac_api:\n%s", traceback.format_exc())
-            if self._mac_api_proc:
-                self._mac_api_proc.kill()
-        finally:
-            self._mac_api_proc = None
-            with self._lock:
-                self._status.mac_api = "stopped"
-            self._emit_status()
-            self._log("info", "mac_api stopped", "mac_api")
-
-    def _mac_api_do_restart(self) -> None:
-        with self._lock:
-            self._status.mac_api = "restarting"
-        self._emit_status()
-        self._log("info", "Restarting mac_api…", "mac_api")
-        self._mac_api_do_stop()
-        time.sleep(1)
-        self._mac_api_do_start()
-
-    def _stream_mac_api_output(self, proc: subprocess.Popen) -> None:
-        try:
-            for line in proc.stdout:
-                line = line.rstrip()
-                if line:
-                    self._log("debug", line, "mac_api")
-            rc = proc.wait()
-            if rc != 0:
-                self._log("warning", f"mac_api exited with code {rc}", "mac_api")
-            with self._lock:
-                self._status.mac_api = "stopped"
-            self._emit_status()
-        except Exception:
-            logger.error("Error streaming mac_api output:\n%s", traceback.format_exc())
 
     # ── DB monitoring ─────────────────────────────
 
@@ -265,29 +153,6 @@ class ServicesManager:
 
         level = "info" if connected else "warning"
         self._log(level, f"DB {new_state} ({self.DB_HOST}:{self.DB_PORT})", "db")
-
-    # ── MAC API health monitoring ──────────────────
-
-    def _mac_api_health_loop(self) -> None:
-        while True:
-            self._check_mac_api_health()
-            time.sleep(self.MAC_API_CHECK_INTERVAL)
-
-    def _check_mac_api_health(self) -> None:
-        import urllib.request
-        import urllib.error
-        try:
-            with urllib.request.urlopen(self.MAC_API_HEALTH_URL, timeout=3) as resp:
-                healthy = resp.status == 200
-        except Exception:
-            healthy = False
-
-        new_health: ApiHealthState = "up" if healthy else "down"
-        with self._lock:
-            changed = self._status.mac_api_health != new_health
-            self._status.mac_api_health = new_health
-        if changed:
-            self._emit_status()
 
     # ── dnsmasq (DHCP/DNS) monitoring ─────────────
 

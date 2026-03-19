@@ -5,7 +5,7 @@ import type { Socket } from 'socket.io-client';
 // Types
 // ──────────────────────────────────────────────────
 
-export type ServiceSource = 'dhcp' | 'nginx' | 'mac_api' | 'db' | 'recovery';
+export type ServiceSource = 'dhcp' | 'nginx' | 'db' | 'recovery';
 
 export interface RecoveryLogEntry {
   ts: number;
@@ -23,9 +23,7 @@ export interface ServiceLogEntry {
 }
 
 export interface ServicesStatus {
-  mac_api:        'running' | 'stopped' | 'starting' | 'stopping' | 'restarting';
   db_connection:  'connected' | 'disconnected' | 'checking';
-  mac_api_health: 'up' | 'down' | 'unknown';
   dnsmasq_status: 'active' | 'inactive' | 'unknown';
   nginx_status:   'active' | 'inactive' | 'unknown';
 }
@@ -56,78 +54,6 @@ function formatTs(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString('fr-FR', {
     hour: '2-digit', minute: '2-digit', second: '2-digit',
   });
-}
-
-async function callServiceApi(path: string) {
-  try {
-    await fetch(`${BACKEND_URL}${path}`, { method: 'POST' });
-  } catch {
-    // silently ignore — UI state is driven by socket events
-  }
-}
-
-// ──────────────────────────────────────────────────
-// Sub-component: Service control row (start / stop)
-// ──────────────────────────────────────────────────
-
-function ServiceControl({
-  label,
-  status,
-  onStart,
-  onStop,
-  onRestart,
-}: {
-  label: string;
-  status: ServicesStatus['mac_api'];
-  onStart: () => void;
-  onStop: () => void;
-  onRestart: () => void;
-}) {
-  const isRunning = status === 'running';
-  const isBusy    = status === 'starting' || status === 'stopping' || status === 'restarting';
-
-  const statusLabel =
-    status === 'running'    ? 'En cours'      :
-    status === 'starting'   ? 'Démarrage…'    :
-    status === 'stopping'   ? 'Arrêt…'        :
-    status === 'restarting' ? 'Redémarrage…'  :
-                              'Arrêté';
-
-  return (
-    <div className="svc-control">
-      <span className="svc-control__label">{label}</span>
-      <span className={`svc-control__badge svc-control__badge--${status}`}>
-        <span className="svc-control__dot" />
-        {statusLabel}
-      </span>
-      <div className="svc-control__actions">
-        <button
-          className="svc-control__btn svc-control__btn--start"
-          onClick={onStart}
-          disabled={isRunning || isBusy}
-          title="Démarrer"
-        >
-          ▶ Démarrer
-        </button>
-        <button
-          className="svc-control__btn svc-control__btn--restart"
-          onClick={onRestart}
-          disabled={!isRunning || isBusy}
-          title="Redémarrer"
-        >
-          ↺ Redémarrer
-        </button>
-        <button
-          className="svc-control__btn svc-control__btn--stop"
-          onClick={onStop}
-          disabled={!isRunning || isBusy}
-          title="Arrêter"
-        >
-          ■ Arrêter
-        </button>
-      </div>
-    </div>
-  );
 }
 
 // ──────────────────────────────────────────────────
@@ -205,7 +131,6 @@ function ServiceLogPane({ lines }: { lines: ServiceLogEntry[] }) {
 const TABS: { id: ServiceSource; label: string }[] = [
   { id: 'dhcp',     label: 'DHCP' },
   { id: 'nginx',    label: 'NGINX' },
-  { id: 'mac_api',  label: 'MAC API' },
   { id: 'db',       label: 'Base de données' },
   { id: 'recovery', label: 'Récupération' },
 ];
@@ -221,7 +146,7 @@ async function callRecoveryApi(path: string) {
 export default function ServicesPanel({ socket, open, onClose, servicesStatus, monitorStatus }: Props) {
   const [activeTab, setActiveTab] = useState<ServiceSource>('dhcp');
   const [logs, setLogs] = useState<Record<ServiceSource, ServiceLogEntry[]>>({
-    dhcp: [], nginx: [], mac_api: [], db: [], recovery: [],
+    dhcp: [], nginx: [], db: [], recovery: [],
   });
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus>('idle');
 
@@ -233,7 +158,6 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
       setLogs({
         dhcp:     history.dhcp    ?? [],
         nginx:    history.nginx   ?? [],
-        mac_api:  history.mac_api ?? [],
         db:       history.db      ?? [],
         recovery: [],
       });
@@ -271,10 +195,6 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
       socket.off('recovery_log', onRecoveryLog);
     };
   }, [socket]);
-
-  const startMacApi   = useCallback(() => callServiceApi('/api/services/mac-api/start'),   []);
-  const stopMacApi    = useCallback(() => callServiceApi('/api/services/mac-api/stop'),    []);
-  const restartMacApi = useCallback(() => callServiceApi('/api/services/mac-api/restart'), []);
 
   const startRecovery = useCallback(() => {
     setLogs(prev => ({ ...prev, recovery: [] }));
@@ -349,34 +269,6 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
 
         {/* Tab content */}
         <div className="svc-panel__content">
-
-          {/* MAC API tab: control + health status + logs */}
-          {activeTab === 'mac_api' && (
-            <>
-              <ServiceControl
-                label="MAC API  (api.py · uvicorn :8000)"
-                status={servicesStatus.mac_api}
-                onStart={startMacApi}
-                onStop={stopMacApi}
-                onRestart={restartMacApi}
-              />
-              <div className={`svc-db-detail svc-db-detail--${
-                servicesStatus.mac_api_health === 'up'   ? 'connected' :
-                servicesStatus.mac_api_health === 'down' ? 'disconnected' :
-                                                           'checking'
-              }`}>
-                <span className="svc-db-detail__dot" />
-                <span>
-                  {servicesStatus.mac_api_health === 'up'
-                    ? 'API health OK — localhost:8000/health'
-                    : servicesStatus.mac_api_health === 'down'
-                    ? 'API injoignable — localhost:8000/health'
-                    : 'Vérification de l\'API…'}
-                </span>
-              </div>
-              <ServiceLogPane lines={logs.mac_api} />
-            </>
-          )}
 
           {/* DB tab: connection status + logs */}
           {activeTab === 'db' && (

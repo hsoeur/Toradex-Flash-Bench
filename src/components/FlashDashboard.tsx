@@ -14,9 +14,7 @@ const BACKEND_URL = 'http://localhost:5001';
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
 const DEFAULT_SERVICES_STATUS: ServicesStatus = {
-  mac_api:        'stopped',
   db_connection:  'disconnected',
-  mac_api_health: 'unknown',
   dnsmasq_status: 'unknown',
   nginx_status:   'unknown',
 };
