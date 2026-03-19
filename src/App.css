@@ -1411,6 +1411,16 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   font-weight: 500;
 }
 
+.login-card__op-dept {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--blue-light);
+  background: var(--blue-dim);
+  padding: 2px 8px;
+  border-radius: 8px;
+  flex-shrink: 0;
+}
+
 .login-card__op-arrow {
   color: var(--text-muted);
   flex-shrink: 0;
@@ -1418,6 +1428,19 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
 }
 .login-card__op-btn:hover .login-card__op-arrow {
   color: var(--blue-light);
+}
+
+.login-card__loading,
+.login-card__error {
+  text-align: center;
+  padding: 1.5rem 0;
+  font-size: 0.9rem;
+}
+.login-card__loading {
+  color: var(--text-muted);
+}
+.login-card__error {
+  color: var(--red);
 }
 
 /* ==========================================

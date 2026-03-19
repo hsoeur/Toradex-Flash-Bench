@@ -174,6 +174,19 @@ class ModuleStore:
                 )
         self._notify()
 
+    def mark_done(self, ip: str) -> None:
+        """Mark a board as successfully done (called after traceability confirmation)."""
+        with self._lock:
+            if ip in self._modules:
+                mod = self._modules[ip]
+                mod.status   = "done"
+                mod.progress = 100
+                logger.info("Board marked done (traceability confirmed) | serial=%s | ip=%s", mod.serial, ip)
+            else:
+                logger.warning("mark_done called for unknown IP %s — ignored", ip)
+                return
+        self._notify()
+
     def mark_error(self, ip: str, message: str = "") -> None:
         with self._lock:
             if ip in self._modules:

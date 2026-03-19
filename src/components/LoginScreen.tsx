@@ -1,24 +1,50 @@
+import { useEffect, useState } from 'react';
 import type { Theme } from '../App';
 
-// ─── Liste des opérateurs ─────────────────────────────────────────────────────
-// Modifiez ce tableau pour ajouter / supprimer des opérateurs.
-export const OPERATORS = [
-  'Opérateur 1',
-  'Opérateur 2',
-  'Opérateur 3',
-  'Opérateur 4',
-  'Opérateur 5',
-  'Opérateur 6',
-];
-// ──────────────────────────────────────────────────────────────────────────────
+const USERS_API_URL = 'http://localhost:10000';
+
+export interface Operator {
+  userUid: string;
+  lastName: string;
+  firstName: string;
+  department: string;
+}
 
 interface Props {
-  onSelect: (operator: string) => void;
+  onSelect: (operator: Operator) => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
 export default function LoginScreen({ onSelect, theme, onToggleTheme }: Props) {
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [loading, setLoading]     = useState(true);
+  const [error, setError]         = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${USERS_API_URL}/api/Users/current`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data: Operator[] = await res.json();
+        if (!cancelled) {
+          setOperators(data);
+          setLoading(false);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setError(err.message || 'Impossible de charger les opérateurs');
+          setLoading(false);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const displayName = (op: Operator) =>
+    `${op.firstName.charAt(0).toUpperCase()}${op.firstName.slice(1).toLowerCase()} ${op.lastName.toUpperCase()}`;
+
   return (
     <div className="login-screen">
       {/* Theme toggle (top-right corner) */}
@@ -57,16 +83,19 @@ export default function LoginScreen({ onSelect, theme, onToggleTheme }: Props) {
         <p className="login-card__subtitle">Sélectionnez votre nom pour continuer</p>
 
         <div className="login-card__list">
-          {OPERATORS.map(op => (
+          {loading && <p className="login-card__loading">Chargement des opérateurs…</p>}
+          {error && <p className="login-card__error">Erreur : {error}</p>}
+          {operators.map(op => (
             <button
-              key={op}
+              key={op.userUid}
               className="login-card__op-btn"
               onClick={() => onSelect(op)}
             >
               <span className="login-card__op-avatar">
-                {op.charAt(0).toUpperCase()}
+                {op.firstName.charAt(0).toUpperCase()}
               </span>
-              <span className="login-card__op-name">{op}</span>
+              <span className="login-card__op-name">{displayName(op)}</span>
+              <span className="login-card__op-dept">{op.department}</span>
               <svg className="login-card__op-arrow" width="16" height="16" viewBox="0 0 16 16" fill="none">
                 <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
               </svg>

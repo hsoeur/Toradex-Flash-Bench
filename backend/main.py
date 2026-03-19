@@ -20,9 +20,10 @@ import subprocess
 import threading
 import time
 import traceback
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import TimedRotatingFileHandler
 
+import requests as http_requests
 from flask import Flask, jsonify, request as flask_request
 from flask_cors import CORS
 from flask_socketio import SocketIO
@@ -44,6 +45,14 @@ LOG_RETENTION_DAYS = 30
 
 # Working directory for docker-compose / uvicorn (project root by default)
 WORK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+# External traceability API
+EXTERNAL_API_URL = "http://192.168.10.1:10000"
+PRODUCT_UID      = "04IN00145"
+MACHINE_UID      = "MO03B"
+OPERATION_NUMBER = 30
+UNIT_UID         = "STR"
+TRACE_LABEL      = "PROG_TORADEX"
 
 # Recovery script (Toradex Easy Installer) — update the folder name when upgrading
 RECOVERY_SCRIPT_DIR  = os.path.abspath(
@@ -172,6 +181,27 @@ service_log_buffer.set_socketio(socketio)
 # ══════════════════════════════════════════════════
 
 module_store = ModuleStore()
+
+# ══════════════════════════════════════════════════
+# Session context (operator + order from frontend)
+# ══════════════════════════════════════════════════
+
+_session_context: dict = {"operatorId": "", "orderNumber": ""}
+_session_context_lock = threading.Lock()
+
+
+def get_session_context() -> dict:
+    with _session_context_lock:
+        return dict(_session_context)
+
+
+def set_session_context(data: dict) -> None:
+    with _session_context_lock:
+        if "operatorId" in data:
+            _session_context["operatorId"] = str(data["operatorId"])
+        if "orderNumber" in data:
+            _session_context["orderNumber"] = str(data["orderNumber"])
+    logger.info("Session context updated: %s", _session_context)
 
 
 def _on_modules_changed(snapshot: dict) -> None:
@@ -390,6 +420,14 @@ def handle_disconnect():
     logger.info("Client disconnected | sid=%s", sid)
 
 
+@socketio.on("set_session_context")
+def handle_set_session_context(data=None):
+    """Receive operator + order context from the frontend."""
+    if data and isinstance(data, dict):
+        set_session_context(data)
+        logger.info("Session context received: %s", data)
+
+
 @socketio.on("reset_boards")
 def handle_reset_boards(data=None):
     """Clear finished (done/error) boards, or all boards if mode='all'."""
@@ -401,6 +439,101 @@ def handle_reset_boards(data=None):
         logger.info("Client requested clearing finished boards")
         module_store.clear_done()
 
+
+
+# ══════════════════════════════════════════════════
+# REST route — Traceability notification (called by board script)
+# ══════════════════════════════════════════════════
+
+
+@app.post("/api/traceability/notify")
+def traceability_notify():
+    """
+    Called by the on-board script (prepare.sh) after MAC injection.
+    Enriches the board data with the session context (operator, order)
+    and forwards the traceability record to the external API.
+    """
+    try:
+        body = flask_request.get_json(force=True)
+    except Exception:
+        return jsonify({"error": "Invalid JSON body"}), 400
+
+    # Required fields from the board script
+    required = ["serialNumber", "macId", "clientMac", "factoryMac"]
+    missing = [f for f in required if not body.get(f)]
+    if missing:
+        return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
+
+    # Session context from the frontend
+    ctx = get_session_context()
+    if not ctx["operatorId"] or not ctx["orderNumber"]:
+        logger.warning(
+            "Traceability notify received but session context incomplete: %s", ctx
+        )
+        return jsonify({
+            "error": "Session context incomplete — no operator/order set on the dashboard"
+        }), 400
+
+    # Build the payload for the external traceability API
+    creation_date = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    trace_payload = {
+        "productUid":            PRODUCT_UID,
+        "serialNumber":          int(body["serialNumber"]),
+        "label":                 TRACE_LABEL,
+        "value":                 body["clientMac"],
+        "classification":        "OK",
+        "creationDate":          creation_date,
+        "operationNumber":       OPERATION_NUMBER,
+        "unitUid":               UNIT_UID,
+        "userUid":               ctx["operatorId"],
+        "machineUid":            MACHINE_UID,
+        "manufacturingOrderUid": int(ctx["orderNumber"]),
+    }
+
+    ext_url = f"{EXTERNAL_API_URL}/api/MeasurementTraceability/create-with-mac"
+
+    logger.info(
+        "Traceability notify | serial=%s | MAC=%s | operator=%s | order=%s",
+        body["serialNumber"], body["clientMac"],
+        ctx["operatorId"], ctx["orderNumber"],
+    )
+    logger.debug(
+        "Traceability request | URL=%s | payload=%s",
+        ext_url, json.dumps(trace_payload, indent=2),
+    )
+
+    try:
+        resp = http_requests.post(
+            ext_url,
+            json=trace_payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=10,
+        )
+    except http_requests.RequestException as exc:
+        logger.error("External traceability API unreachable: %s", exc)
+        return jsonify({"error": "External traceability API unreachable", "detail": str(exc)}), 502
+
+    if resp.status_code != 200:
+        logger.error(
+            "External traceability API error | HTTP %d | %s", resp.status_code, resp.text
+        )
+        return jsonify({
+            "error": "External traceability API returned an error",
+            "httpCode": resp.status_code,
+            "detail": resp.text,
+        }), 502
+
+    # Mark the board as done in the real-time monitor
+    board_ip = flask_request.remote_addr
+    module_store.mark_done(board_ip)
+
+    logger.info(
+        "Traceability OK | serial=%s | MAC=%s | ip=%s",
+        body["serialNumber"], body["clientMac"], board_ip,
+    )
+
+    return jsonify({"ok": True, "message": "Traceability recorded"})
 
 
 # ══════════════════════════════════════════════════

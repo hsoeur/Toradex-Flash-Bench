@@ -30,14 +30,15 @@ const DEFAULT_MONITOR_STATUS: MonitorStatus = {
 };
 
 interface Props {
-  operator: string;
+  operatorId: string;
+  operatorName: string;
   orderNumber: string;
   onLogout: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
-export default function FlashDashboard({ operator, orderNumber, onLogout, theme, onToggleTheme }: Props) {
+export default function FlashDashboard({ operatorId, operatorName, orderNumber, onLogout, theme, onToggleTheme }: Props) {
   const [modules, setModules] = useState<ModulesMap>({});
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [consoleOpen, setConsoleOpen] = useState(false);
@@ -53,7 +54,11 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
     const s = io(BACKEND_URL, { transports: ['websocket', 'polling'] });
     setSocket(s);
 
-    s.on('connect',       () => setConnectionStatus('connected'));
+    s.on('connect', () => {
+      setConnectionStatus('connected');
+      // Send session context so the backend can enrich traceability calls
+      s.emit('set_session_context', { operatorId: operatorId, orderNumber });
+    });
     s.on('disconnect',    () => setConnectionStatus('disconnected'));
     s.on('connect_error', () => setConnectionStatus('disconnected'));
     s.on('modules_update',  (data: ModulesMap)      => setModules({ ...data }));
@@ -62,7 +67,7 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
     s.on('vnc_config',      (data: { ws_port: number }) => setVncWsPort(data.ws_port));
 
     return () => { s.disconnect(); };
-  }, []);
+  }, [operatorId, orderNumber]);
 
   const boardEntries = Object.entries(modules);
   const doneCount     = boardEntries.filter(([, d]) => d.status === 'done').length;
@@ -231,9 +236,9 @@ export default function FlashDashboard({ operator, orderNumber, onLogout, theme,
           {/* Operator chip */}
           <div className="dashboard__operator">
             <span className="dashboard__operator-avatar">
-              {operator.charAt(0).toUpperCase()}
+              {operatorName.charAt(0).toUpperCase()}
             </span>
-            <span className="dashboard__operator-name">{operator}</span>
+            <span className="dashboard__operator-name">{operatorName}</span>
             <button
               className="dashboard__operator-logout"
               onClick={onLogout}

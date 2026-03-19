@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import type { Theme } from '../App';
 
 interface Props {
-  operator: string;
+  operatorName: string;
   onConfirm: (orderNumber: string) => void;
   onBack: () => void;
   theme: Theme;
   onToggleTheme: () => void;
 }
 
-export default function ScanOrderScreen({ operator, onConfirm, onBack, theme, onToggleTheme }: Props) {
+export default function ScanOrderScreen({ operatorName, onConfirm, onBack, theme, onToggleTheme }: Props) {
   const [value, setValue] = useState('');
   const [error, setError]   = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
@@ -74,9 +74,9 @@ export default function ScanOrderScreen({ operator, onConfirm, onBack, theme, on
         {/* Operator badge */}
         <div className="scan-order__operator-badge">
           <span className="scan-order__operator-avatar">
-            {operator.charAt(0).toUpperCase()}
+            {operatorName.charAt(0).toUpperCase()}
           </span>
-          <span className="scan-order__operator-name">{operator}</span>
+          <span className="scan-order__operator-name">{operatorName}</span>
         </div>
 
         <p className="login-card__subtitle scan-order__subtitle">
