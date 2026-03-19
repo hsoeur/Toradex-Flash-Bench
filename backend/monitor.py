@@ -141,10 +141,6 @@ class ModuleStore:
                 mod.progress  = 100
                 mod.status    = "done"
 
-            logger.info(
-                "Progress update | serial=%s | ip=%s | step=%s | progress=%d%%",
-                mod.serial, ip, step_key, mod.progress,
-            )
         self._notify()
 
     def handle_event(self, ip: str, raw_data: str) -> None:
