@@ -10,6 +10,7 @@ interface Props {
   wsPort: number;
   startTime: number | null;
   boardStatus: BoardStatus;
+  errorMessage: string | null;
 }
 
 function formatElapsed(seconds: number): string {
@@ -22,7 +23,7 @@ function formatElapsed(seconds: number): string {
  * Embeds a noVNC viewer that connects to a board's Tezi VNC server
  * through the websockify proxy.
  */
-export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus }: Props) {
+export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, errorMessage }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
   const [status, setStatus] = useState<VncStatus>('connecting');
@@ -93,8 +94,14 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus }
     error: 'Erreur VNC',
   };
 
+  const viewerClass = [
+    'vnc-viewer',
+    boardStatus === 'done' ? 'vnc-viewer--done' : '',
+    boardStatus === 'error' ? 'vnc-viewer--error' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className={`vnc-viewer ${boardStatus === 'done' ? 'vnc-viewer--done' : ''}`}>
+    <div className={viewerClass}>
       <div className="vnc-viewer__header">
         <div className="vnc-viewer__info">
           <span className="vnc-viewer__serial">{serial}</span>
@@ -125,6 +132,21 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus }
             </svg>
             <span className="vnc-viewer__done-label">Flashage Terminé</span>
             <span className="vnc-viewer__done-time">{formatElapsed(elapsed)}</span>
+          </div>
+        )}
+        {boardStatus === 'error' && (
+          <div className="vnc-viewer__error-overlay">
+            <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+              <circle cx="24" cy="24" r="22" stroke="currentColor" strokeWidth="2.5" />
+              <path d="M16 16l16 16M32 16L16 32" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
+            </svg>
+            <span className="vnc-viewer__error-label">Erreur de Programmation</span>
+            {errorMessage && (
+              <span className="vnc-viewer__error-detail">{errorMessage}</span>
+            )}
+            {startTime && (
+              <span className="vnc-viewer__error-time">{formatElapsed(elapsed)}</span>
+            )}
           </div>
         )}
       </div>

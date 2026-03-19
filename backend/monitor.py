@@ -53,19 +53,21 @@ BoardStatus = str   # 'waiting' | 'flashing' | 'done' | 'error'
 
 @dataclass
 class BoardModule:
-    serial:       str
-    progress:     int              = 0
-    status:       BoardStatus      = "waiting"
-    current_step: Optional[str]    = None
-    start_time:   Optional[float]  = None   # Unix timestamp (seconds)
+    serial:        str
+    progress:      int              = 0
+    status:        BoardStatus      = "waiting"
+    current_step:  Optional[str]    = None
+    start_time:    Optional[float]  = None   # Unix timestamp (seconds)
+    error_message: Optional[str]    = None   # Set when status == 'error'
 
     def to_dict(self) -> dict:
         return {
-            "serial":      self.serial,
-            "progress":    self.progress,
-            "status":      self.status,
-            "currentStep": self.current_step,
-            "startTime":   self.start_time,
+            "serial":       self.serial,
+            "progress":     self.progress,
+            "status":       self.status,
+            "currentStep":  self.current_step,
+            "startTime":    self.start_time,
+            "errorMessage": self.error_message,
         }
 
 
@@ -109,11 +111,12 @@ class ModuleStore:
             else:
                 # Board reconnected — reset its state
                 mod = self._modules[ip]
-                mod.serial       = serial
-                mod.progress     = 0
-                mod.status       = "waiting"
-                mod.current_step = None
-                mod.start_time   = None
+                mod.serial        = serial
+                mod.progress      = 0
+                mod.status        = "waiting"
+                mod.current_step  = None
+                mod.start_time    = None
+                mod.error_message = None
                 logger.info("Board re-registered (reset) | serial=%s | ip=%s", serial, ip)
         self._notify()
 
@@ -151,6 +154,7 @@ class ModuleStore:
         serial number.  We do NOT reset the board state here.
         Instead, TRACEABILITY_OK and END/Rebooting promote the board to
         'done' so the card turns green.
+        ERROR messages from wrapup.sh mark the board as 'error'.
         """
         with self._lock:
             if ip not in self._modules:
@@ -160,7 +164,17 @@ class ModuleStore:
 
             mod = self._modules[ip]
 
-            if "TRACEABILITY_OK" in raw_data or ("END" in raw_data and "Rebooting" in raw_data):
+            if "ERROR" in raw_data:
+                # Extract the error detail from the pipe-delimited message
+                # Format: "YYYY-MM-DD HH:MM:SS | ERROR | <detail> | Serial=..."
+                error_detail = self._extract_error_detail(raw_data)
+                mod.status        = "error"
+                mod.error_message = error_detail
+                logger.error(
+                    "Board error detected | serial=%s | ip=%s | error=%s | raw=%s",
+                    mod.serial, ip, error_detail, raw_data.strip(),
+                )
+            elif "TRACEABILITY_OK" in raw_data or ("END" in raw_data and "Rebooting" in raw_data):
                 mod.status   = "done"
                 mod.progress = 100
                 logger.info(
@@ -173,6 +187,23 @@ class ModuleStore:
                     mod.serial, ip, raw_data.strip(),
                 )
         self._notify()
+
+    @staticmethod
+    def _extract_error_detail(raw_data: str) -> str:
+        """
+        Parse a pipe-delimited log line from wrapup.sh and return a
+        human-readable error description.
+        Format: "YYYY-MM-DD HH:MM:SS | ERROR | <detail> | key=value | ..."
+        """
+        parts = [p.strip() for p in raw_data.split("|")]
+        # Find the ERROR token and return everything after it joined
+        for i, part in enumerate(parts):
+            if "ERROR" in part:
+                detail_parts = parts[i + 1:] if i + 1 < len(parts) else []
+                if detail_parts:
+                    return " | ".join(detail_parts)
+                return "Unknown error"
+        return raw_data.strip()
 
     def mark_done(self, ip: str) -> None:
         """Mark a board as successfully done (called after traceability confirmation)."""
@@ -191,6 +222,7 @@ class ModuleStore:
         with self._lock:
             if ip in self._modules:
                 self._modules[ip].status = "error"
+                self._modules[ip].error_message = message or "Unknown error"
                 logger.error("Board error | ip=%s | %s", ip, message)
         self._notify()
     def clear_done(self) -> None:

@@ -291,6 +291,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
                 wsPort={vncWsPort}
                 startTime={data.startTime}
                 boardStatus={data.status}
+                errorMessage={data.errorMessage ?? null}
               />
             ))}
           </div>

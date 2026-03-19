@@ -6,6 +6,7 @@ export interface BoardModule {
   status: BoardStatus;
   currentStep: string | null;
   startTime: number | null; // Unix timestamp (seconds)
+  errorMessage: string | null; // Set when status === 'error'
 }
 
 // Key = IP address
