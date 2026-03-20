@@ -149,8 +149,9 @@ def main() -> None:
         host=FLASK_HOST,
         port=FLASK_PORT,
         debug=DEBUG,
-        use_reloader=False,   # reloader breaks threading
+        use_reloader=False,              # reloader breaks threading
         log_output=False,
+        allow_unsafe_werkzeug=True,      # needed for systemd / production
     )
 
 

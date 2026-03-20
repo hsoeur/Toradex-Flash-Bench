@@ -1,0 +1,13 @@
+services:
+  # ── Frontend (Nginx + React build) ─────────────
+  # Serves the React SPA and proxies API/WebSocket/VNC to the backend
+  # running natively on the host (python main.py).
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

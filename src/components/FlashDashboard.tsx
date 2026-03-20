@@ -9,7 +9,9 @@ import VncViewer from './VncViewer';
 
 import type { Theme } from '../App';
 
-const BACKEND_URL = 'http://localhost:5001';
+// In production (Docker), nginx proxies /socket.io/ and /api/ to the backend.
+// In development, point to the local backend directly.
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
@@ -70,8 +72,6 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
   const boardEntries = Object.entries(modules);
   const doneCount     = boardEntries.filter(([, d]) => d.status === 'done').length;
   const errorCount    = boardEntries.filter(([, d]) => d.status === 'error').length;
-  const flashingCount = boardEntries.filter(([, d]) => d.status === 'flashing').length;
-  const waitingCount  = boardEntries.filter(([, d]) => d.status === 'waiting').length;
   const flashingBoards = boardEntries.filter(([, d]) => d.status === 'flashing' || d.status === 'done' || d.status === 'error');
   const finishedCount = doneCount + errorCount;
 
