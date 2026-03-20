@@ -110,7 +110,7 @@ sio_events.register(
 )
 
 # ── Register REST blueprints ────────────────────
-from routes import traceability, recovery_routes, images, status
+from routes import traceability, recovery_routes, images, status, manufacturing_order
 
 traceability.init(module_store)
 recovery_routes.init(recovery_runner)
@@ -121,6 +121,7 @@ app.register_blueprint(traceability.bp)
 app.register_blueprint(recovery_routes.bp)
 app.register_blueprint(images.bp)
 app.register_blueprint(status.bp)
+app.register_blueprint(manufacturing_order.bp)
 
 
 # ══════════════════════════════════════════════════

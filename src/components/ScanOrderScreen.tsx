@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Theme } from '../App';
 
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+
+/** Parse "OF25000" or "of25000" or bare "25000" → numeric UID string, or null if invalid. */
+function parseOfInput(raw: string): string | null {
+  const stripped = raw.trim().replace(/^[Oo][Ff]/g, '');
+  if (/^\d+$/.test(stripped)) return stripped;
+  return null;
+}
+
 interface Props {
   operatorName: string;
   onConfirm: (orderNumber: string) => void;
@@ -12,6 +21,7 @@ interface Props {
 export default function ScanOrderScreen({ operatorName, onConfirm, onBack, theme, onToggleTheme }: Props) {
   const [value, setValue] = useState('');
   const [error, setError]   = useState('');
+  const [loading, setLoading] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Auto-focus the input so the barcode scanner can type directly
@@ -19,7 +29,7 @@ export default function ScanOrderScreen({ operatorName, onConfirm, onBack, theme
     inputRef.current?.focus();
   }, []);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = value.trim();
     if (!trimmed) {
@@ -27,7 +37,37 @@ export default function ScanOrderScreen({ operatorName, onConfirm, onBack, theme
       inputRef.current?.focus();
       return;
     }
-    onConfirm(trimmed);
+
+    const uid = parseOfInput(trimmed);
+    if (!uid) {
+      setError('Format invalide. Attendu : OF25000 ou un nombre.');
+      inputRef.current?.focus();
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    try {
+      const resp = await fetch(`${BACKEND_URL}/api/manufacturing-order/${uid}`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        setError(data?.error ?? `Ordre de fabrication ${uid} introuvable.`);
+        inputRef.current?.focus();
+        return;
+      }
+      // data.status validation (optional guard)
+      if (data.status && data.status !== 'ACTIVE') {
+        setError(`L'OF ${uid} n'est pas actif (statut: ${data.status}).`);
+        inputRef.current?.focus();
+        return;
+      }
+      onConfirm(uid);
+    } catch {
+      setError('Impossible de contacter le serveur. Vérifiez la connexion.');
+      inputRef.current?.focus();
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,11 +158,17 @@ export default function ScanOrderScreen({ operatorName, onConfirm, onBack, theme
             <p className="scan-order__error">{error}</p>
           )}
 
-          <button type="submit" className="scan-order__confirm-btn">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-            </svg>
-            Confirmer
+          <button type="submit" className="scan-order__confirm-btn" disabled={loading}>
+            {loading ? (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" style={{ animation: 'spin 0.8s linear infinite' }}>
+                <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="28" strokeDashoffset="10"/>
+              </svg>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8l4 4 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+            {loading ? 'Validation…' : 'Confirmer'}
           </button>
         </form>
 
