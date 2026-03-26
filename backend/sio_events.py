@@ -80,6 +80,32 @@ def register(
             logger.info("Client requested clearing finished boards")
             module_store.clear_done()
 
+    @socketio.on("board_position_assigned")
+    def handle_board_position_assigned(data=None):
+        """Log serial / image / position association when a board is mapped to a slot."""
+        if not data or not isinstance(data, dict):
+            return
+        ip = data.get("ip", "")
+        position = data.get("position", "?")
+        # Look up the serial from the module store
+        snap = module_store.snapshot()
+        board = snap.get(ip, {})
+        serial = board.get("serial", "unknown")
+        # Look up the currently active (autoinstall) image
+        image_name = "unknown"
+        try:
+            images = image_service.get_all_images()
+            for img in images:
+                if img.get("autoinstall"):
+                    image_name = img.get("name", img.get("folder", "unknown"))
+                    break
+        except Exception:
+            logger.warning("Could not resolve active image for board log")
+        logger.info(
+            "Board assigned to position | serial=%s | image=%s | position=POS%s | ip=%s",
+            serial, image_name, position, ip,
+        )
+
     @socketio.on("reset_board")
     def handle_reset_board(data=None):
         """Reset a single board by IP (used when an operator re-scans a position)."""

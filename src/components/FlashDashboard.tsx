@@ -133,6 +133,12 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
                 boardData: newModules[ip],
               };
               queueChanged = true;
+
+              // Notify backend of position assignment for traceability logging
+              socketRef.current?.emit('board_position_assigned', {
+                ip,
+                position: slotIdx + 1,
+              });
             }
           }
           return queueChanged ? remainingQueue : prevQ;
