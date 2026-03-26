@@ -160,16 +160,25 @@ class ModuleStore:
 
         Each *step_key* is awarded **at most once** per board to prevent
         duplicate NGINX log lines from inflating the progress counter.
+
+        Progress updates for IPs that have **not** been registered via
+        :meth:`register_board` are silently ignored.  This prevents stale
+        NGINX log entries (e.g. from a previous session) from creating
+        phantom modules with incorrect ``startTime`` values.
         """
         with self._lock:
             if ip not in self._modules:
-                self._modules[ip] = BoardModule(serial="unknown")
-                logger.warning("Progress for unregistered IP %s — created placeholder", ip)
+                logger.debug("Progress for unregistered IP %s — ignored (step=%s)", ip, step_key)
+                return
 
             mod = self._modules[ip]
 
             # Guard: skip already-awarded steps
             if step_key in mod.completed_steps:
+                return
+
+            # Guard: don't apply progress to boards already in a terminal state
+            if mod.status in (BoardStatus.DONE, BoardStatus.ERROR):
                 return
 
             # First progress hit → transition to flashing
@@ -277,6 +286,19 @@ class ModuleStore:
             if to_remove:
                 logger.info("Cleared %d finished board(s): %s", len(to_remove), ", ".join(to_remove))
                 should_notify = True
+        if should_notify:
+            self._notify()
+
+    def clear_one(self, ip: str) -> None:
+        """Remove a single board by *ip* from the store."""
+        should_notify = False
+        with self._lock:
+            if ip in self._modules:
+                del self._modules[ip]
+                logger.info("Cleared single board | ip=%s", ip)
+                should_notify = True
+            else:
+                logger.warning("clear_one called for unknown IP %s — ignored", ip)
         if should_notify:
             self._notify()
 
@@ -444,6 +466,7 @@ class NginxMonitor:
     def __init__(self, store: ModuleStore, log_path: str = NGINX_ACCESS_LOG) -> None:
         self._store    = store
         self._log_path = log_path
+        self._process: subprocess.Popen | None = None
         self._thread   = threading.Thread(target=self._run, name="NginxMonitor", daemon=True)
 
     def start(self) -> None:
@@ -451,15 +474,31 @@ class NginxMonitor:
         self._thread.start()
         logger.info("NginxMonitor started — watching %s", self._log_path)
 
+    def stop(self) -> None:
+        """Terminate the tail subprocess so the port/PID is freed."""
+        proc = self._process
+        if proc and proc.poll() is None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=3)
+                logger.info("NginxMonitor tail process stopped")
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                logger.warning("NginxMonitor tail process killed")
+            except Exception:
+                logger.debug("Error stopping NginxMonitor tail", exc_info=True)
+        self._process = None
+
     def _run(self) -> None:
         """Long-running loop: ``tail -F`` the access log and process each line."""
         try:
-            process = subprocess.Popen(
-                ["sudo", "tail", "-F", self._log_path],
+            self._process = subprocess.Popen(
+                ["sudo", "tail", "-F", "-n", "0", self._log_path],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
             )
+            process = self._process
             assert process.stdout is not None
             logger.info("NginxMonitor: tail process PID=%d", process.pid)
 

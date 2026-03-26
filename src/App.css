@@ -241,7 +241,9 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
 /* Content */
 .dashboard__content {
   flex: 1;
-  padding: 28px;
+  padding: 12px;
+  min-height: 0;
+  overflow: hidden;
 }
 
 /* Empty state */
@@ -2215,4 +2217,521 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
 .dashboard__operator,
 .dashboard__conn {
   transition: background 0.25s, border-color 0.25s, color 0.25s, box-shadow 0.25s;
+}
+
+/* ==========================================
+   HIDDEN BARCODE SCANNER INPUT
+   ========================================== */
+.scan-input {
+  position: absolute;
+  top: -100px;
+  left: -100px;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ==========================================
+   SCAN INSTRUCTION BAR
+   ========================================== */
+.scan-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 20px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.scan-bar__instruction {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.05rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.scan-bar__instruction strong {
+  color: var(--blue-light);
+  font-weight: 700;
+}
+
+.scan-bar__instruction kbd {
+  display: inline-block;
+  padding: 2px 8px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: 4px;
+  color: var(--text-primary);
+}
+
+.scan-bar__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+.scan-bar__icon--insert {
+  font-size: 1.5rem;
+  font-weight: 900;
+  color: var(--green);
+  animation: bounce-down 1s infinite;
+}
+
+.scan-bar__icon--power {
+  color: var(--yellow);
+  animation: pulse-power 1.5s ease-in-out infinite;
+}
+
+.scan-bar--action {
+  background: rgba(46, 160, 67, 0.08);
+  border-bottom-color: var(--green);
+}
+
+.scan-bar--power {
+  background: rgba(210, 153, 34, 0.08);
+  border-bottom-color: var(--yellow);
+}
+
+.scan-bar__feedback {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--yellow-light);
+  padding: 4px 14px;
+  background: var(--yellow-dim);
+  border-radius: 20px;
+  animation: vnc-done-fade-in 0.3s ease;
+}
+
+.scan-bar__confirm-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 18px;
+  margin-left: 6px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #fff;
+  background: var(--green);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+  animation: pulse-confirm 1.5s infinite;
+}
+
+.scan-bar__confirm-btn:hover {
+  background: var(--green-light);
+  transform: scale(1.04);
+}
+
+.scan-bar__confirm-btn:active {
+  transform: scale(0.97);
+}
+
+@keyframes pulse-confirm {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(46, 160, 67, 0.5); }
+  50%      { box-shadow: 0 0 0 8px rgba(46, 160, 67, 0); }
+}
+
+@keyframes bounce-down {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(4px); }
+}
+
+/* ==========================================
+   SKIP BUTTON
+   ========================================== */
+.dashboard__skip-btn {
+  border-color: var(--yellow-dim) !important;
+  color: var(--yellow-light) !important;
+}
+.dashboard__skip-btn:hover {
+  border-color: var(--yellow) !important;
+  background: var(--yellow-dim) !important;
+}
+
+/* ==========================================
+   POSITION GRID — 5 FIXED COLUMNS
+   ========================================== */
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  padding: 0;
+  height: 100%;
+}
+
+/* ==========================================
+   POSITION SLOT
+   ========================================== */
+.pos-slot {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  min-height: 0;
+}
+
+/* ── State-based border colors ── */
+.pos-slot--empty {
+  border-style: dashed;
+  border-color: var(--border);
+  opacity: 0.6;
+}
+
+.pos-slot--awaiting_card {
+  border-color: var(--green);
+  box-shadow: 0 0 16px rgba(46, 160, 67, 0.25), inset 0 0 30px rgba(46, 160, 67, 0.04);
+  animation: slot-pulse-green 2s infinite;
+}
+
+.pos-slot--active-target {
+  border-color: var(--green);
+  box-shadow: 0 0 20px rgba(46, 160, 67, 0.35), inset 0 0 40px rgba(46, 160, 67, 0.06);
+}
+
+.pos-slot--awaiting_boot {
+  border-color: var(--yellow);
+  box-shadow: 0 0 12px rgba(210, 153, 34, 0.20);
+}
+
+.pos-slot--flashing {
+  border-color: var(--blue);
+  box-shadow: 0 0 8px rgba(14, 106, 173, 0.20);
+}
+
+.pos-slot--done {
+  border-color: var(--green);
+  box-shadow: 0 0 12px rgba(46, 160, 67, 0.25);
+}
+
+.pos-slot--error {
+  border-color: var(--red);
+  box-shadow: 0 0 12px rgba(218, 54, 51, 0.25);
+}
+
+@keyframes slot-pulse-green {
+  0%, 100% { box-shadow: 0 0 16px rgba(46, 160, 67, 0.25); }
+  50%      { box-shadow: 0 0 24px rgba(46, 160, 67, 0.45); }
+}
+
+/* ── Badge (POS1-POS5 label) ── */
+.pos-slot__badge {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 3px 10px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 6px;
+  z-index: 15;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+.pos-slot__badge--empty         { background: var(--gray-dim);   color: var(--text-muted); }
+.pos-slot__badge--awaiting_card { background: var(--green-dim);  color: var(--green-light); }
+.pos-slot__badge--awaiting_boot { background: var(--yellow-dim); color: var(--yellow-light); }
+.pos-slot__badge--flashing      { background: var(--blue-dim);   color: var(--blue-light); }
+.pos-slot__badge--done          { background: var(--green-dim);  color: var(--green-light); }
+.pos-slot__badge--error         { background: var(--red-dim);    color: var(--red); }
+
+/* ── Body area ── */
+.pos-slot__body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pos-slot__body--centered {
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  gap: 12px;
+  text-align: center;
+}
+
+.pos-slot__body--vnc {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* ── Icon in empty/awaiting states ── */
+.pos-slot__icon {
+  color: var(--text-muted);
+}
+
+/* ── Messages ── */
+.pos-slot__message {
+  font-size: 0.95rem;
+  line-height: 1.4;
+}
+
+.pos-slot__message strong {
+  font-weight: 700;
+}
+
+.pos-slot__message--muted {
+  color: var(--text-muted);
+}
+
+.pos-slot__message--action {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.pos-slot__message--action strong {
+  color: var(--green-light);
+}
+
+.pos-slot__message--hint {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+.pos-slot__message--info {
+  color: var(--yellow-light);
+  font-weight: 600;
+}
+
+/* ── Power message (awaiting_boot) ── */
+.pos-slot__message--power {
+  color: var(--yellow-light);
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+/* ── Power icon (awaiting_boot) ── */
+.pos-slot__power-icon {
+  color: var(--yellow);
+  animation: pulse-power 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse-power {
+  0%, 100% { opacity: 0.6; transform: scale(1); }
+  50%      { opacity: 1;   transform: scale(1.08); }
+}
+
+/* ── Waiting dot indicator ── */
+.pos-slot__waiting-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--yellow);
+  animation: pulse-dot 1.2s infinite;
+  margin-top: 4px;
+}
+
+/* ── Insert animation (arrow bouncing down) ── */
+.pos-slot__insert-anim {
+  color: var(--green);
+}
+
+.pos-slot__arrow-down {
+  animation: bounce-down 1s infinite;
+}
+
+/* ── Spinner for awaiting_boot ── */
+.pos-slot__spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid var(--border);
+  border-top-color: var(--yellow);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Progress bar (flashing state) ── */
+.pos-slot__progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.pos-slot__progress-track {
+  flex: 1;
+  height: 6px;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.pos-slot__progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--blue), var(--blue-light));
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+
+.pos-slot__progress-pct {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--blue-light);
+  min-width: 34px;
+  text-align: right;
+}
+
+/* ── VNC container inside slot ── */
+.pos-slot__vnc-container {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pos-slot__vnc-container .vnc-viewer {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  border-radius: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pos-slot__vnc-container .vnc-viewer__canvas-wrapper {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pos-slot__vnc-container .vnc-viewer__canvas {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+}
+
+/* ── Result overlays (done/error, on top of VNC) ── */
+.pos-slot__result {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 16px 12px;
+  z-index: 20;
+  animation: vnc-done-fade-in 0.4s ease;
+  text-align: center;
+}
+
+.pos-slot__result--done {
+  background: rgba(0, 0, 0, 0.75);
+  color: var(--green);
+}
+
+.pos-slot__result--done span:first-of-type {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pos-slot__result--error {
+  background: rgba(0, 0, 0, 0.80);
+  color: var(--red);
+}
+
+.pos-slot__result--error span:first-of-type {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.pos-slot__result-sub {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.pos-slot__result-sub strong {
+  color: var(--blue-light);
+}
+
+.pos-slot__result-detail {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(239, 68, 68, 0.25);
+  padding: 4px 10px;
+  border-radius: 6px;
+  max-width: 95%;
+  word-break: break-word;
+}
+
+/* ── Re-scan hint strip (below VNC on done/error) ── */
+.pos-slot__rescan-hint {
+  padding: 6px 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
+  text-align: center;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
+.pos-slot__rescan-hint strong {
+  color: var(--blue-light);
+  font-weight: 700;
+}
+
+.pos-slot__rescan-hint--done {
+  border-top-color: var(--green);
+}
+
+.pos-slot__rescan-hint--error {
+  border-top-color: var(--red);
+}
+
+/* ==========================================
+   RESPONSIVE: smaller screens or fewer slots
+   ========================================== */
+@media (max-width: 1400px) {
+  .position-grid {
+    grid-template-columns: repeat(5, 1fr);
+    gap: 8px;
+  }
+  .pos-slot__message { font-size: 0.85rem; }
+}
+
+@media (max-width: 1100px) {
+  .position-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 700px) {
+  .position-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }

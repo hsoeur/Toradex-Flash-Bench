@@ -13,10 +13,13 @@ Run with:
 
 from __future__ import annotations
 
+import atexit
 import logging
+import signal
+import subprocess
 import traceback
 
-from config import FLASK_HOST, FLASK_PORT, DEBUG, SERIAL_TCP_PORT
+from config import FLASK_HOST, FLASK_PORT, DEBUG, SERIAL_TCP_PORT, SERIAL_TCP_HOST
 
 # ── Logging (must be initialised first) ──────────
 from logging_setup import init_logging
@@ -51,11 +54,13 @@ def _on_modules_changed(snapshot: dict) -> None:
         logger.error("Error emitting modules_update:\n%s", traceback.format_exc())
 
 
-module_store.subscribe(_on_modules_changed)
-
-# VNC proxy
+# VNC proxy — subscribed FIRST so the token file is written
+# before the frontend is notified (avoids a race where the VNC
+# viewer connects before websockify has the token).
 vnc_proxy = VncProxyManager()
 module_store.subscribe(vnc_proxy.on_modules_changed)
+
+module_store.subscribe(_on_modules_changed)
 
 # Recovery runner
 recovery_runner = RecoveryRunner(socketio)
@@ -129,7 +134,56 @@ app.register_blueprint(manufacturing_order.bp)
 # ══════════════════════════════════════════════════
 
 
+# ── Stale process cleanup ────────────────────────
+
+def _kill_stale_port_holders(*ports: int) -> None:
+    """Kill any process (other than ourselves) that is listening on the given ports."""
+    import os as _os
+    my_pid = _os.getpid()
+    for port in ports:
+        try:
+            out = subprocess.check_output(
+                ["fuser", f"{port}/tcp"],
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            continue
+        for token in out.split():
+            try:
+                pid = int(token)
+            except ValueError:
+                continue
+            if pid == my_pid:
+                continue
+            logger.warning("Killing stale process PID %d on port %d", pid, port)
+            try:
+                _os.kill(pid, signal.SIGKILL)
+            except OSError:
+                pass
+
+
+def _shutdown() -> None:
+    """Graceful shutdown — stop child processes so ports are freed for the next start."""
+    logger.info("Shutting down FlashBench backend…")
+    try:
+        vnc_proxy.stop()
+    except Exception:
+        logger.debug("vnc_proxy.stop failed", exc_info=True)
+    try:
+        nginx_monitor.stop()
+    except Exception:
+        logger.debug("nginx_monitor.stop failed", exc_info=True)
+    logger.info("Shutdown complete")
+
+
 def main() -> None:
+    # Kill leftover processes from a previous unclean exit
+    _kill_stale_port_holders(SERIAL_TCP_PORT, vnc_proxy.port, FLASK_PORT)
+
+    # Register cleanup for graceful exit
+    atexit.register(_shutdown)
+
     logger.info("═" * 60)
     logger.info("FlashBench Monitor backend starting")
     logger.info("  Flask-SocketIO : http://%s:%d", FLASK_HOST, FLASK_PORT)

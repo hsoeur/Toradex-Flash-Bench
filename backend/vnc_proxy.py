@@ -42,7 +42,12 @@ class VncProxyManager:
     # ── lifecycle ─────────────────────────────────
 
     def start(self) -> None:
-        """Start the websockify proxy process."""
+        """Start the websockify proxy process.
+
+        Any pre-existing websockify that kept port occupied from a
+        previous unclean shutdown is killed first.
+        """
+        self._kill_process()           # clean up leftover child
         self._write_token_file(set())
         self._start_process()
         self._running = True
@@ -128,22 +133,28 @@ class VncProxyManager:
     def on_modules_changed(self, snapshot: dict) -> None:
         """
         Called whenever the module store changes.
-        Updates the token file with IPs of currently-flashing boards.
+        Updates the token file with IPs of all active boards.
         websockify re-reads the file on each new WS connection (TokenFile plugin).
+
+        Tokens are kept for **all** board statuses (waiting, flashing, done,
+        error) so the VNC viewer can connect at any point during the lifecycle
+        — in particular, this avoids a race between the token-file write and
+        the first VNC connection attempt that systematically failed for the
+        first board of a session.
         """
-        flashing_ips = {
+        active_ips = {
             ip
             for ip, data in snapshot.items()
-            if data.get("status") == "flashing"
+            if data.get("status") in ("waiting", "flashing", "done", "error")
         }
 
         with self._lock:
-            if flashing_ips != self._active_ips:
-                self._active_ips = set(flashing_ips)
-                self._write_token_file(flashing_ips)
+            if active_ips != self._active_ips:
+                self._active_ips = set(active_ips)
+                self._write_token_file(active_ips)
                 logger.info(
                     "VNC targets updated: %s",
-                    sorted(flashing_ips) if flashing_ips else "(none)",
+                    sorted(active_ips) if active_ips else "(none)",
                 )
 
         # Restart websockify if it died unexpectedly

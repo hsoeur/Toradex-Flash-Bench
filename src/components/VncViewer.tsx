@@ -4,6 +4,17 @@ import type { BoardStatus } from '../types/board';
 
 type VncStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
+/** Max number of automatic reconnection attempts */
+const MAX_RETRIES = 30;
+/** Delay between reconnection attempts (ms) */
+const RETRY_DELAY = 3_000;
+/**
+ * Per-attempt connection timeout (ms).
+ * If neither 'connect' nor 'disconnect' fires within this window,
+ * the attempt is torn down and a retry is scheduled.
+ */
+const CONNECT_TIMEOUT = 10_000;
+
 interface Props {
   ip: string;
   serial: string;
@@ -22,14 +33,32 @@ function formatElapsed(seconds: number): string {
 /**
  * Embeds a noVNC viewer that connects to a board's Tezi VNC server
  * through the websockify proxy.
+ *
+ * Automatically retries on connection failure (the VNC server may not
+ * be ready yet when the board has just booted).
+ *
+ * The connection is stopped automatically when the board reaches a
+ * terminal state (done / error) to avoid pointless retry noise.
  */
 export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, errorMessage }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rfbRef = useRef<RFB | null>(null);
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const retriesRef = useRef(0);
+  const mountedRef = useRef(true);
+  /** True once at least one successful VNC connection was made this lifecycle. */
+  const connectedOnceRef = useRef(false);
+
   const [status, setStatus] = useState<VncStatus>('connecting');
+  const [retryCount, setRetryCount] = useState(0);
   const [elapsed, setElapsed] = useState(0);
 
-  // Elapsed flash time counter
+  // Keep boardStatus accessible inside non-React callbacks (timers, RFB events)
+  const boardStatusRef = useRef(boardStatus);
+  boardStatusRef.current = boardStatus;
+
+  // ── Elapsed flash time counter ──────────────────
   useEffect(() => {
     if (!startTime || boardStatus === 'waiting') {
       setElapsed(0);
@@ -43,52 +72,153 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, 
     return () => clearInterval(interval);
   }, [startTime, boardStatus]);
 
+  // ── Stop retries once board reaches terminal state ──
   useEffect(() => {
+    if (boardStatus !== 'done' && boardStatus !== 'error') return;
+
+    // Cancel any pending retry / connection-timeout timers
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+    if (connectTimeoutRef.current) {
+      clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+
+    // If VNC was never connected, switch to a silent 'disconnected' status
+    // so the header no longer shows a misleading "Connexion VNC… (tentative N)".
+    if (!connectedOnceRef.current) {
+      setStatus('disconnected');
+    }
+  }, [boardStatus]);
+
+  // ── Main VNC connection effect ──────────────────
+  useEffect(() => {
+    mountedRef.current = true;
+    retriesRef.current = 0;
+    connectedOnceRef.current = false;
+    setRetryCount(0);
+
     const el = containerRef.current;
     if (!el) return;
 
-    // Derive websockify host from current page location
     const wsHost = window.location.hostname || 'localhost';
     const wsUrl = `ws://${wsHost}:${wsPort}/?token=${ip}`;
 
-    setStatus('connecting');
-
-    let rfb: RFB;
-    try {
-      rfb = new RFB(el, wsUrl);
-    } catch {
-      setStatus('error');
-      return;
+    /** Safely tear down the current RFB instance and clear timers. */
+    function cleanupRfb() {
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
+      // Null the ref *before* calling disconnect so that the disconnect
+      // event handler (which checks rfbRef.current === rfb) becomes a no-op.
+      const rfb = rfbRef.current;
+      rfbRef.current = null;
+      try { rfb?.disconnect(); } catch { /* already gone */ }
     }
 
-    rfb.scaleViewport = true;
-    rfb.resizeSession = false;
-    rfb.viewOnly = true;        // read-only — just monitoring
-    rfb.focusOnClick = false;
-    rfb.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#101316';
+    function connect() {
+      if (!mountedRef.current || !el) return;
 
-    rfb.addEventListener('connect', () => {
-      setStatus('connected');
-    });
+      // Don't attempt if the board has already finished
+      const bs = boardStatusRef.current;
+      if (bs === 'done' || bs === 'error') return;
 
-    rfb.addEventListener('disconnect', (e) => {
-      setStatus(e.detail.clean ? 'disconnected' : 'error');
-    });
+      // Tear down the previous attempt cleanly
+      cleanupRfb();
 
-    rfbRef.current = rfb;
+      // Clear previous children (noVNC injects canvas elements)
+      while (el.firstChild) el.removeChild(el.firstChild);
+
+      setStatus('connecting');
+
+      let rfb: RFB;
+      try {
+        rfb = new RFB(el, wsUrl);
+      } catch {
+        scheduleRetry();
+        return;
+      }
+
+      rfb.scaleViewport = true;
+      rfb.resizeSession = false;
+      rfb.viewOnly = true;
+      rfb.focusOnClick = false;
+      rfb.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#101316';
+
+      // Safety net: if the RFB instance neither connects nor disconnects
+      // within CONNECT_TIMEOUT ms, force-tear it down and retry.
+      connectTimeoutRef.current = setTimeout(() => {
+        if (!mountedRef.current) return;
+        // Only act if this rfb is still the current one
+        if (rfbRef.current !== rfb) return;
+        cleanupRfb();
+        scheduleRetry();
+      }, CONNECT_TIMEOUT);
+
+      rfb.addEventListener('connect', () => {
+        if (!mountedRef.current || rfbRef.current !== rfb) return;
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current);
+          connectTimeoutRef.current = null;
+        }
+        retriesRef.current = 0;
+        connectedOnceRef.current = true;
+        setRetryCount(0);
+        setStatus('connected');
+      });
+
+      rfb.addEventListener('disconnect', () => {
+        if (!mountedRef.current || rfbRef.current !== rfb) return;
+        if (connectTimeoutRef.current) {
+          clearTimeout(connectTimeoutRef.current);
+          connectTimeoutRef.current = null;
+        }
+        // Always retry on *any* disconnect (clean or unclean).
+        // A clean disconnect typically means the VNC server closed
+        // the connection (e.g. board rebooting) — we still want to
+        // attempt reconnection unless the board has finished.
+        scheduleRetry();
+      });
+
+      rfbRef.current = rfb;
+    }
+
+    function scheduleRetry() {
+      if (!mountedRef.current) return;
+
+      // If the board has already finished, don't retry
+      const bs = boardStatusRef.current;
+      if (bs === 'done' || bs === 'error') {
+        if (!connectedOnceRef.current) {
+          setStatus('disconnected');
+        }
+        return;
+      }
+
+      if (retriesRef.current >= MAX_RETRIES) {
+        setStatus('error');
+        return;
+      }
+      retriesRef.current += 1;
+      setRetryCount(retriesRef.current);
+      setStatus('connecting');
+      retryTimerRef.current = setTimeout(connect, RETRY_DELAY);
+    }
+
+    connect();
 
     return () => {
-      try {
-        rfb.disconnect();
-      } catch {
-        // already disconnected
-      }
-      rfbRef.current = null;
+      mountedRef.current = false;
+      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      cleanupRfb();
     };
   }, [ip, wsPort]);
 
   const statusLabels: Record<VncStatus, string> = {
-    connecting: 'Connexion VNC…',
+    connecting: retryCount > 0 ? `Connexion VNC… (tentative ${retryCount})` : 'Connexion VNC…',
     connected: 'VNC connecté',
     disconnected: 'VNC déconnecté',
     error: 'Erreur VNC',

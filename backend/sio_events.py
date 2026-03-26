@@ -79,3 +79,13 @@ def register(
         else:
             logger.info("Client requested clearing finished boards")
             module_store.clear_done()
+
+    @socketio.on("reset_board")
+    def handle_reset_board(data=None):
+        """Reset a single board by IP (used when an operator re-scans a position)."""
+        ip = (data or {}).get("ip")
+        if not ip:
+            logger.warning("reset_board called without IP")
+            return
+        logger.info("Client requested single board reset | ip=%s", ip)
+        module_store.clear_one(ip)
