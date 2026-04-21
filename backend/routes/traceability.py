@@ -18,9 +18,11 @@ from config import (
     OPERATION_NUMBER,
     PRODUCT_UID,
     TRACE_LABEL,
+    TRACE_LABEL_IMAGE,
     UNIT_UID,
 )
 from session import get as get_session
+import image_service
 
 logger = logging.getLogger("FlashBench.Routes.Traceability")
 
@@ -48,7 +50,7 @@ def notify():
     except Exception:
         return jsonify({"error": "Invalid JSON body"}), 400
 
-    required = ["serialNumber", "macId", "clientMac", "factoryMac"]
+    required = ["serialNumber", "macId", "clientMac", "factoryMac", "imageFolder"]
     missing  = [f for f in required if not body.get(f)]
     if missing:
         return jsonify({"error": f"Missing fields: {', '.join(missing)}"}), 400
@@ -102,8 +104,67 @@ def notify():
             "detail":   resp.text,
         }), 502
 
+    # ── Second traceability record: Linux image name ──────────
+    try:
+        all_images = image_service.get_all_images()
+        active_img = next((img for img in all_images if img["autoinstall"]), None)
+        if active_img:
+            img_name    = active_img["name"]
+            img_version = active_img["version"]
+            img_date    = active_img["release_date"]
+            image_value = f"{img_name}_{img_version}_{img_date}"
+        else:
+            logger.warning("No active image found (autoinstall=true) — falling back to imageFolder")
+            image_value = body.get("imageFolder", "unknown")
+    except Exception as exc:
+        logger.warning("Cannot read image list: %s — falling back to imageFolder", exc)
+        image_value = body.get("imageFolder", "unknown")
+
+    image_payload = {
+        "productUid":            PRODUCT_UID,
+        "serialNumber":          int(body["serialNumber"]),
+        "label":                 TRACE_LABEL_IMAGE,
+        "value":                 image_value,
+        "classification":        "OK",
+        "creationDate":          creation_date,
+        "operationNumber":       OPERATION_NUMBER,
+        "unitUid":               UNIT_UID,
+        "userUid":               ctx["operatorId"],
+        "machineUid":            MACHINE_UID,
+        "manufacturingOrderUid": int(ctx["orderNumber"]),
+    }
+
+    ext_url_image = f"{EXTERNAL_API_URL}/api/MeasurementTraceability/create"
+    logger.info(
+        "Notify IMAGE | serial=%s | image=%s | operator=%s | order=%s",
+        body["serialNumber"], body["imageFolder"],
+        ctx["operatorId"], ctx["orderNumber"],
+    )
+    logger.debug("Request IMAGE | URL=%s | payload=%s", ext_url_image, json.dumps(image_payload, indent=2))
+
+    try:
+        resp_img = http_requests.post(
+            ext_url_image,
+            json=image_payload,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            timeout=10,
+        )
+    except http_requests.RequestException as exc:
+        logger.error("External API unreachable (image trace): %s", exc)
+        return jsonify({"error": "External traceability API unreachable (image)", "detail": str(exc)}), 502
+
+    if resp_img.status_code != 200:
+        logger.error("External API IMAGE | HTTP %d | %s", resp_img.status_code, resp_img.text)
+        return jsonify({
+            "error":    "External traceability API returned an error (image)",
+            "httpCode": resp_img.status_code,
+            "detail":   resp_img.text,
+        }), 502
+
+    logger.info("OK IMAGE | serial=%s | image=%s", body["serialNumber"], body["imageFolder"])
+
     board_ip = flask_request.remote_addr
     _module_store.mark_done(board_ip)
 
     logger.info("OK | serial=%s | MAC=%s | ip=%s", body["serialNumber"], body["clientMac"], board_ip)
-    return jsonify({"ok": True, "message": "Traceability recorded"})
+    return jsonify({"ok": True, "message": "Traceability recorded (MAC + image)"})

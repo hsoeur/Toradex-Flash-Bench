@@ -31,6 +31,7 @@ MACHINE_UID        = "MO03B"
 OPERATION_NUMBER   = 30
 UNIT_UID           = "STR"
 TRACE_LABEL        = "PROG_TORADEX"
+TRACE_LABEL_IMAGE  = "IMAGE_TORADEX"
 
 # ── Recovery script (Toradex Easy Installer) ─────
 
