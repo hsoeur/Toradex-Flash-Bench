@@ -19,6 +19,13 @@ type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 /** Regex matching barcode scans: POS1 … POS5 (case-insensitive) */
 const POS_RE = /^POS([1-5])$/i;
 
+/**
+ * Regex matching a card barcode.
+ * Must be a numeric string of at least 8 digits.
+ * The last 8 digits are the board serial number.
+ */
+const CARD_BARCODE_RE = /^\d{8,}$/;
+
 const DEFAULT_SERVICES_STATUS: ServicesStatus = {
   db_connection:  'disconnected',
   dnsmasq_status: 'unknown',
@@ -60,8 +67,12 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
 
   // ── Position slot state ───────────────────────
   const [slots, setSlots] = useState<PositionSlotType[]>(initSlots);
-  /** FIFO queue of slot indices waiting for a board to appear (awaiting_boot) */
-  const [pendingQueue, setPendingQueue] = useState<number[]>([]);
+  /**
+   * Synchronous set of IPs that have been claimed by a slot.
+   * Ensures the same IP can never be assigned to two different slots
+   * even when mapModulesToSlots is called multiple times before React renders.
+   */
+  const assignedIpsRef = useRef<Set<string>>(new Set());
   /** Feedback text shown briefly under the scan bar */
   const [scanFeedback, setScanFeedback] = useState<string>('');
   /** Track which slot is in awaiting_card state (for Enter confirmation) */
@@ -69,6 +80,13 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
 
   // ── Modules from backend ──────────────────────
   const modulesRef = useRef<ModulesMap>({});
+
+  // ── Refs kept in sync with latest state (for use inside
+  //    non-React callbacks: socket events, timers, etc.) ──
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  const socketRef = useRef(socket);
+  socketRef.current = socket;
 
   // ── Global keyboard buffer for barcode scanner ──
   // Captures keystrokes globally (no need for a focused input).
@@ -107,97 +125,123 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [operatorId, orderNumber]);
 
-  // ── Map newly detected boards to pending slots (FIFO) ─
+  // ── Map boards to slots by SERIAL NUMBER match (deterministic) ─
+  // When a board registers via TCP, its serial is compared against
+  // the expectedSerial of each awaiting_boot slot. Only exact
+  // matches are accepted — no FIFO, no guessing.
   const mapModulesToSlots = useCallback((newModules: ModulesMap) => {
-    setSlots(prev => {
-      const updated = [...prev];
-      let queueChanged = false;
+    const currentSlots = slotsRef.current;
 
-      // Get all IPs that are already assigned to a slot
-      const assignedIps = new Set(updated.map(s => s.boardIp).filter(Boolean));
+    // Build assignments by matching serial numbers
+    type Assignment = { slotIdx: number; ip: string };
+    const assignments: Assignment[] = [];
 
-      // Find new IPs (present in modules but not assigned)
-      const newIps = Object.keys(newModules).filter(ip => !assignedIps.has(ip));
+    for (const [ip, mod] of Object.entries(newModules)) {
+      // Skip IPs already claimed
+      if (assignedIpsRef.current.has(ip)) continue;
 
-      if (newIps.length > 0) {
-        setPendingQueue(prevQ => {
-          const remainingQueue = [...prevQ];
-          for (const ip of newIps) {
-            if (remainingQueue.length === 0) break;
-            const slotIdx = remainingQueue.shift()!;
-            if (updated[slotIdx]?.state === 'awaiting_boot') {
-              updated[slotIdx] = {
-                ...updated[slotIdx],
-                state: 'flashing',
-                boardIp: ip,
-                boardData: newModules[ip],
-              };
-              queueChanged = true;
-
-              // Notify backend of position assignment for traceability logging
-              socketRef.current?.emit('board_position_assigned', {
-                ip,
-                position: slotIdx + 1,
-              });
-            }
-          }
-          return queueChanged ? remainingQueue : prevQ;
-        });
+      // Skip IPs that were cleared from any slot
+      let isCleared = false;
+      for (const slot of currentSlots) {
+        if (slot.clearedIps.has(ip)) { isCleared = true; break; }
       }
+      if (isCleared) continue;
 
-      // Update boardData for all assigned slots from latest modules
-      for (let i = 0; i < updated.length; i++) {
-        const slot = updated[i];
-        if (slot.boardIp && newModules[slot.boardIp]) {
-          const mod = newModules[slot.boardIp];
-          const newState =
-            mod.status === 'done' ? 'done' :
-            mod.status === 'error' ? 'error' :
-            (mod.status === 'flashing' || mod.status === 'waiting') ? 'flashing' :
-            slot.state;
-          updated[i] = {
-            ...slot,
-            state: (slot.state === 'flashing' || slot.state === 'done' || slot.state === 'error') ? newState : slot.state,
-            boardData: mod,
-          };
+      // Find a slot that expects THIS serial
+      for (let i = 0; i < currentSlots.length; i++) {
+        const slot = currentSlots[i];
+        if (slot.state === 'awaiting_boot' && slot.expectedSerial && slot.expectedSerial === mod.serial) {
+          assignedIpsRef.current.add(ip);
+          assignments.push({ slotIdx: i, ip });
+          break; // One board per slot
         }
       }
+    }
 
-      return updated;
-    });
+    // Apply to React state
+    if (assignments.length > 0 || Object.keys(newModules).length > 0) {
+      setSlots(prev => {
+        const updated = [...prev];
+
+        // Apply serial-matched assignments
+        for (const { slotIdx, ip } of assignments) {
+          if (updated[slotIdx]?.state === 'awaiting_boot') {
+            updated[slotIdx] = {
+              ...updated[slotIdx],
+              state: 'flashing',
+              boardIp: ip,
+              boardData: newModules[ip],
+            };
+          }
+        }
+
+        // Update boardData for all assigned slots from latest modules
+        for (let i = 0; i < updated.length; i++) {
+          const slot = updated[i];
+          if (slot.boardIp && newModules[slot.boardIp]) {
+            const mod = newModules[slot.boardIp];
+            const newState =
+              mod.status === 'done' ? 'done' :
+              mod.status === 'error' ? 'error' :
+              (mod.status === 'flashing' || mod.status === 'waiting') ? 'flashing' :
+              slot.state;
+            updated[i] = {
+              ...slot,
+              state: (slot.state === 'flashing' || slot.state === 'done' || slot.state === 'error') ? newState : slot.state,
+              boardData: mod,
+            };
+          }
+        }
+
+        return updated;
+      });
+    }
+
+    // Notify backend OUTSIDE the state updater to ensure it fires exactly once.
+    for (const { slotIdx, ip } of assignments) {
+      socketRef.current?.emit('board_position_assigned', {
+        ip,
+        position: slotIdx + 1,
+      });
+    }
   }, []);
-
-  // ── Core action: confirm card insertion on a slot ──
-  const confirmInsertion = useCallback(() => {
-    const idx = awaitingCardSlot;
-    if (idx < 0) return;
-    setSlots(prev => {
-      const updated = [...prev];
-      updated[idx] = { ...prev[idx], state: 'awaiting_boot' };
-      return updated;
-    });
-    setPendingQueue(prev => [...prev, idx]);
-    showFeedback(`✅ POS${idx + 1} confirmée — mettez la carte sous tension`);
-  }, [awaitingCardSlot, showFeedback]);
 
   // ── Core action: process a barcode scan string ──
   const processScan = useCallback((raw: string) => {
+    // 1️⃣ POS barcode: POS1…POS5
     const posMatch = raw.match(POS_RE);
     if (posMatch) {
       const posIdx = parseInt(posMatch[1], 10) - 1;
       setSlots(prev => {
         const slot = prev[posIdx];
         if (slot.state === 'done' || slot.state === 'error') {
-          if (slot.boardIp && socketRef.current) {
-            socketRef.current.emit('reset_board', { ip: slot.boardIp });
+          const clearedIps = new Set(slot.clearedIps);
+          if (slot.boardIp) {
+            clearedIps.add(slot.boardIp);
+            assignedIpsRef.current.delete(slot.boardIp);
+            socketRef.current?.emit('reset_board', { ip: slot.boardIp });
           }
           const updated = [...prev];
-          updated[posIdx] = { state: 'awaiting_card', boardIp: null, boardData: null, scannedAt: Date.now() };
+          updated[posIdx] = {
+            state: 'awaiting_card',
+            boardIp: null,
+            boardData: null,
+            scannedAt: Date.now(),
+            expectedSerial: null,
+            clearedIps,
+          };
           return updated;
         }
         if (slot.state === 'empty') {
           const updated = [...prev];
-          updated[posIdx] = { state: 'awaiting_card', boardIp: null, boardData: null, scannedAt: Date.now() };
+          updated[posIdx] = {
+            state: 'awaiting_card',
+            boardIp: null,
+            boardData: null,
+            scannedAt: Date.now(),
+            expectedSerial: null,
+            clearedIps: new Set(),
+          };
           return updated;
         }
         showFeedback(`⚠️ POS${posIdx + 1} est déjà en cours d'utilisation`);
@@ -205,20 +249,71 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
       });
       return;
     }
+
+    // 2️⃣ Card barcode: numeric, at least 8 digits — last 8 = serial
+    if (CARD_BARCODE_RE.test(raw) && awaitingCardSlotRef.current >= 0) {
+      const serial = raw.slice(-8);
+      const idx = awaitingCardSlotRef.current;
+
+      // Check if another slot already expects this serial
+      const currentSlots = slotsRef.current;
+      const duplicate = currentSlots.find(
+        (s, i) => i !== idx && s.expectedSerial === serial &&
+        (s.state === 'awaiting_boot' || s.state === 'flashing')
+      );
+      if (duplicate) {
+        showFeedback(`⚠️ S/N ${serial} est déjà assigné à un autre slot`);
+        return;
+      }
+
+      setSlots(prev => {
+        const updated = [...prev];
+        updated[idx] = {
+          ...prev[idx],
+          state: 'awaiting_boot',
+          expectedSerial: serial,
+          scannedAt: Date.now(),
+        };
+        return updated;
+      });
+      showFeedback(`✅ POS${idx + 1} — S/N ${serial} — mettez la carte sous tension`);
+
+      // Check if board already available in modules
+      const modules = modulesRef.current;
+      for (const [ip, mod] of Object.entries(modules)) {
+        if (mod.serial === serial && !assignedIpsRef.current.has(ip)) {
+          assignedIpsRef.current.add(ip);
+          setSlots(prev => {
+            const updated = [...prev];
+            if (updated[idx]?.state === 'awaiting_boot') {
+              updated[idx] = {
+                ...updated[idx],
+                state: 'flashing',
+                boardIp: ip,
+                boardData: mod,
+              };
+            }
+            return updated;
+          });
+          socketRef.current?.emit('board_position_assigned', { ip, position: idx + 1 });
+          break;
+        }
+      }
+      return;
+    }
+
     if (raw !== '') {
-      showFeedback(`⚠️ Code non reconnu : "${raw}"`);
+      if (awaitingCardSlotRef.current >= 0) {
+        showFeedback(`⚠️ Code-barres carte invalide : "${raw}"`);
+      } else {
+        showFeedback(`⚠️ Code non reconnu : "${raw}"`);
+      }
     }
   }, [showFeedback]);
 
   // ── Handle barcode scan input — global keydown listener ─
-  const slotsRef = useRef(slots);
-  slotsRef.current = slots;
-  const socketRef = useRef(socket);
-  socketRef.current = socket;
   const awaitingCardSlotRef = useRef(awaitingCardSlot);
   awaitingCardSlotRef.current = awaitingCardSlot;
-  const confirmInsertionRef = useRef(confirmInsertion);
-  confirmInsertionRef.current = confirmInsertion;
   const processScanRef = useRef(processScan);
   processScanRef.current = processScan;
 
@@ -243,12 +338,10 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         if (scanTimerRef.current) { clearTimeout(scanTimerRef.current); scanTimerRef.current = null; }
 
         if (raw !== '') {
-          // Barcode scan content
+          // Barcode scan content (POS or card barcode)
           processScanRef.current(raw);
-        } else {
-          // Empty Enter = confirm insertion
-          confirmInsertionRef.current();
         }
+        // Empty Enter is now ignored (no more "confirm insertion")
         return;
       }
 
@@ -472,14 +565,15 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         <div className="scan-bar__instruction">
           {hasAwaitingCard ? (
             <>
-              <span className="scan-bar__icon scan-bar__icon--insert">↓</span>
-              Insérez la carte dans <strong>POS{awaitingCardSlot + 1}</strong> puis appuyez sur <kbd>Entrée</kbd> ou
-              <button
-                className="scan-bar__confirm-btn"
-                onClick={confirmInsertion}
-              >
-                ✓ Confirmer POS{awaitingCardSlot + 1}
-              </button>
+              <span className="scan-bar__icon scan-bar__icon--insert">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  <rect x="2" y="4" width="6" height="16" rx="1" fill="currentColor" opacity="0.7"/>
+                  <rect x="9" y="4" width="3" height="16" rx="0.5" fill="currentColor" opacity="0.5"/>
+                  <rect x="13" y="4" width="6" height="16" rx="1" fill="currentColor" opacity="0.7"/>
+                  <rect x="20" y="4" width="2" height="16" rx="0.5" fill="currentColor" opacity="0.5"/>
+                </svg>
+              </span>
+              Scannez le <strong>code-barres de la carte</strong> pour <strong>POS{awaitingCardSlot + 1}</strong>
             </>
           ) : hasAwaitingBoot ? (
             <>

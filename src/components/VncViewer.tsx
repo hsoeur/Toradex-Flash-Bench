@@ -5,15 +5,15 @@ import type { BoardStatus } from '../types/board';
 type VncStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 
 /** Max number of automatic reconnection attempts */
-const MAX_RETRIES = 30;
+const MAX_RETRIES = 60;
 /** Delay between reconnection attempts (ms) */
-const RETRY_DELAY = 3_000;
+const RETRY_DELAY = 1_000;
 /**
  * Per-attempt connection timeout (ms).
  * If neither 'connect' nor 'disconnect' fires within this window,
  * the attempt is torn down and a retry is scheduled.
  */
-const CONNECT_TIMEOUT = 10_000;
+const CONNECT_TIMEOUT = 5_000;
 
 interface Props {
   ip: string;
@@ -235,7 +235,6 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, 
       <div className="vnc-viewer__header">
         <div className="vnc-viewer__info">
           <span className="vnc-viewer__serial">{serial}</span>
-          <span className="vnc-viewer__ip">{ip}</span>
         </div>
         {startTime && boardStatus !== 'waiting' && (
           <span className="vnc-viewer__timer">
@@ -279,6 +278,9 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, 
             )}
           </div>
         )}
+      </div>
+      <div className="vnc-viewer__footer">
+        <span className="vnc-viewer__ip">{ip}</span>
       </div>
     </div>
   );

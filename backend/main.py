@@ -4,7 +4,6 @@ main.py — FlashBench backend entry point.
 Starts and orchestrates:
   - Flask-SocketIO server  (port 5001)  ← consumed by the React frontend
   - SerialListener         (port 5000)  ← boards announce their serial numbers
-  - NginxMonitor                        ← tails /var/log/nginx/access.log
   - ServicesManager                     ← monitors DB, dnsmasq, nginx
 
 Run with:
@@ -38,7 +37,7 @@ sio_log_handler.set_socketio(socketio)
 service_log_buffer.set_socketio(socketio)
 
 # ── Core components ──────────────────────────────
-from monitor import ModuleStore, NginxMonitor, SerialListener
+from monitor import ModuleStore, SerialListener
 from services import ServicesManager
 from vnc_proxy import VncProxyManager
 from recovery import RecoveryRunner
@@ -78,9 +77,6 @@ serial_listener = SerialListener(
     store=module_store,
     on_status_changed=_on_serial_listener_status_changed,
 )
-
-# Nginx monitor
-nginx_monitor = NginxMonitor(store=module_store)
 
 
 # Services manager
@@ -170,10 +166,6 @@ def _shutdown() -> None:
         vnc_proxy.stop()
     except Exception:
         logger.debug("vnc_proxy.stop failed", exc_info=True)
-    try:
-        nginx_monitor.stop()
-    except Exception:
-        logger.debug("nginx_monitor.stop failed", exc_info=True)
     logger.info("Shutdown complete")
 
 
@@ -189,12 +181,10 @@ def main() -> None:
     logger.info("  Flask-SocketIO : http://%s:%d", FLASK_HOST, FLASK_PORT)
     logger.info("  Serial TCP     : port %d", SERIAL_TCP_PORT)
     logger.info("  VNC proxy      : ws://0.0.0.0:%d", vnc_proxy.port)
-    logger.info("  Nginx log      : /var/log/nginx/access.log")
     logger.info("═" * 60)
 
     # Start background workers
     serial_listener.start()
-    nginx_monitor.start()
     services_manager.start()
     vnc_proxy.start()
 

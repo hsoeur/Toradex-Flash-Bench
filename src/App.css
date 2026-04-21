@@ -1983,6 +1983,15 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   white-space: nowrap;
 }
 
+.vnc-viewer__footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 14px;
+  background: var(--surface-2);
+  border-top: 1px solid var(--border);
+}
+
 .vnc-viewer__status {
   display: flex;
   align-items: center;
@@ -2541,6 +2550,20 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   margin-top: 4px;
 }
 
+/* ── Expected serial badge in awaiting_boot ── */
+.pos-slot__serial-badge {
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--yellow) 30%, transparent);
+  border-radius: 6px;
+  padding: 3px 10px;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+
 /* ── Insert animation (arrow bouncing down) ── */
 .pos-slot__insert-anim {
   color: var(--green);
@@ -2615,6 +2638,11 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+/* Shift VNC header content right so it doesn't overlap the POS badge */
+.pos-slot__vnc-container .vnc-viewer__header {
+  padding-left: 72px;
 }
 
 .pos-slot__vnc-container .vnc-viewer__canvas-wrapper {

@@ -7,7 +7,6 @@ Responsibilities
 - ``BoardStatus``   : Enum of the possible board lifecycle states.
 - ``ModuleStore``   : Thread-safe state store for all active board modules.
 - ``SerialListener``: TCP server that receives serial numbers / events from prepare.sh.
-- ``NginxMonitor``  : Tails the NGINX access log and tracks file-download progress.
 
 Both monitors call registered ``ModulesChangedCallback`` subscribers whenever
 the state mutates so the Flask-SocketIO layer can push updates to clients.
@@ -18,10 +17,8 @@ from __future__ import annotations
 __all__ = [
     "BoardModule",
     "BoardStatus",
-    "FILE_PROGRESS",
     "ModuleStore",
     "ModulesChangedCallback",
-    "NginxMonitor",
     "SerialListener",
 ]
 
@@ -35,25 +32,11 @@ import traceback
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Dict
 
-from config import NGINX_ACCESS_LOG, SERIAL_TCP_HOST, SERIAL_TCP_PORT
+from config import SERIAL_TCP_HOST, SERIAL_TCP_PORT
 
 logger = logging.getLogger("FlashBench.Monitor")
-
-# ──────────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────────
-
-# Keys are substrings matched against each NGINX log line.
-# Values are the progress points awarded for that file download.
-# Total must equal 100 for a complete flash cycle.
-FILE_PROGRESS: dict[str, int] = {
-    "bootfs.tar.xz": 20,
-    ".tar.xz HTTP":  60,
-    "tiboot3":        5,
-    "tispl":          5,
-    "u-boot.img":    10,
-}
 
 
 # ──────────────────────────────────────────────────
@@ -75,39 +58,39 @@ class BoardStatus(str, Enum):
     ERROR    = "error"
 
 
+# Duration (seconds) during which an IP is suppressed after being cleared.
+# This prevents stale TCP re-registrations from an old board that was removed.
+IP_SUPPRESSION_TIMEOUT = 30
+
+
 @dataclass(slots=True)
 class BoardModule:
     """Represents a single board being monitored during a flash session."""
 
     serial:          str
-    progress:        int              = 0
     status:          BoardStatus      = BoardStatus.WAITING
-    current_step:    str | None       = None
     start_time:      float | None     = None    # Unix timestamp (seconds)
     error_message:   str | None       = None    # Set when status == ERROR
-    completed_steps: set[str]         = field(default_factory=set, repr=False)
+    registered_at:   float            = 0.0     # Unix timestamp when board was registered
 
     # ── helpers ───────────────────────────────────
 
     def reset(self, serial: str) -> None:
         """Reinitialise mutable fields (board reconnected)."""
         self.serial          = serial
-        self.progress        = 0
         self.status          = BoardStatus.WAITING
-        self.current_step    = None
         self.start_time      = None
         self.error_message   = None
-        self.completed_steps = set()
+        self.registered_at   = time.time()
 
     def to_dict(self) -> dict[str, object]:
         """Return a JSON-serialisable snapshot (camelCase keys for the frontend)."""
         return {
             "serial":       self.serial,
-            "progress":     self.progress,
             "status":       self.status.value,
-            "currentStep":  self.current_step,
             "startTime":    self.start_time,
             "errorMessage": self.error_message,
+            "registeredAt": self.registered_at,
         }
 
 
@@ -125,6 +108,10 @@ class ModuleStore:
         self._modules: dict[str, BoardModule] = {}
         self._lock = threading.Lock()
         self._callbacks: list[ModulesChangedCallback] = []
+        # IP suppression: maps IP → expiry timestamp.
+        # Boards from suppressed IPs are silently rejected to prevent
+        # stale serial numbers from re-appearing after a slot is cleared.
+        self._suppressed_ips: Dict[str, float] = {}
 
     # ── subscription ──────────────────────────────
 
@@ -143,56 +130,54 @@ class ModuleStore:
 
     # ── mutations ─────────────────────────────────
 
-    def register_board(self, ip: str, serial: str) -> None:
-        """Called by ``SerialListener`` when a board announces itself."""
+    def _is_suppressed(self, ip: str) -> bool:
+        """Check if *ip* is currently suppressed (cleared recently)."""
+        expiry = self._suppressed_ips.get(ip)
+        if expiry is None:
+            return False
+        if time.time() < expiry:
+            return True
+        # Suppression expired — clean up
+        del self._suppressed_ips[ip]
+        return False
+
+    def _suppress_ip(self, ip: str) -> None:
+        """Mark *ip* as suppressed for ``IP_SUPPRESSION_TIMEOUT`` seconds."""
+        self._suppressed_ips[ip] = time.time() + IP_SUPPRESSION_TIMEOUT
+        logger.info(
+            "IP %s suppressed for %ds to prevent stale re-registration",
+            ip, IP_SUPPRESSION_TIMEOUT,
+        )
+
+    def unsuppress_ip(self, ip: str) -> None:
+        """Explicitly remove IP suppression (e.g. operator intentionally re-uses the slot)."""
         with self._lock:
+            removed = self._suppressed_ips.pop(ip, None)
+            if removed:
+                logger.info("IP %s suppression lifted manually", ip)
+
+    def register_board(self, ip: str, serial: str) -> None:
+        """Called by ``SerialListener`` when a board announces itself.
+
+        Registration is **rejected** if the IP is currently suppressed
+        (recently cleared from a slot) to prevent stale serial numbers
+        from being re-assigned.
+        """
+        with self._lock:
+            if self._is_suppressed(ip):
+                logger.warning(
+                    "BLOCKED stale registration | serial=%s | ip=%s "
+                    "(IP suppressed after recent clear)",
+                    serial, ip,
+                )
+                return
+
             if ip not in self._modules:
-                self._modules[ip] = BoardModule(serial=serial)
+                self._modules[ip] = BoardModule(serial=serial, registered_at=time.time())
                 logger.info("Board registered | serial=%s | ip=%s", serial, ip)
             else:
                 self._modules[ip].reset(serial)
                 logger.info("Board re-registered (reset) | serial=%s | ip=%s", serial, ip)
-        self._notify()
-
-    def apply_progress(self, ip: str, step_key: str, points: int) -> None:
-        """
-        Called by ``NginxMonitor`` when a file download is detected for *ip*.
-
-        Each *step_key* is awarded **at most once** per board to prevent
-        duplicate NGINX log lines from inflating the progress counter.
-
-        Progress updates for IPs that have **not** been registered via
-        :meth:`register_board` are silently ignored.  This prevents stale
-        NGINX log entries (e.g. from a previous session) from creating
-        phantom modules with incorrect ``startTime`` values.
-        """
-        with self._lock:
-            if ip not in self._modules:
-                logger.debug("Progress for unregistered IP %s — ignored (step=%s)", ip, step_key)
-                return
-
-            mod = self._modules[ip]
-
-            # Guard: skip already-awarded steps
-            if step_key in mod.completed_steps:
-                return
-
-            # Guard: don't apply progress to boards already in a terminal state
-            if mod.status in (BoardStatus.DONE, BoardStatus.ERROR):
-                return
-
-            # First progress hit → transition to flashing
-            if mod.status is BoardStatus.WAITING:
-                mod.status     = BoardStatus.FLASHING
-                mod.start_time = time.time()
-
-            mod.completed_steps.add(step_key)
-            mod.current_step = step_key
-            mod.progress     = min(mod.progress + points, 100)
-
-            if mod.progress >= 100:
-                mod.status = BoardStatus.DONE
-
         self._notify()
 
     def handle_event(self, ip: str, raw_data: str) -> None:
@@ -204,8 +189,17 @@ class ModuleStore:
 
         - ``TRACEABILITY_OK`` or ``END … Rebooting`` → :attr:`BoardStatus.DONE`
         - ``ERROR`` → :attr:`BoardStatus.ERROR` with extracted detail
+
+        Events from **suppressed** IPs are silently dropped.
         """
         with self._lock:
+            if self._is_suppressed(ip):
+                logger.warning(
+                    "BLOCKED event from suppressed IP %s | data=%s",
+                    ip, raw_data.strip(),
+                )
+                return
+
             if ip not in self._modules:
                 logger.warning("Event received for unknown IP %s — ignored", ip)
                 return
@@ -222,7 +216,6 @@ class ModuleStore:
                 )
             elif "TRACEABILITY_OK" in raw_data or ("END" in raw_data and "Rebooting" in raw_data):
                 mod.status   = BoardStatus.DONE
-                mod.progress = 100
                 logger.info(
                     "Board flash confirmed done | serial=%s | ip=%s | event=%s",
                     mod.serial, ip, raw_data.strip(),
@@ -259,7 +252,6 @@ class ModuleStore:
                 return
             mod = self._modules[ip]
             mod.status   = BoardStatus.DONE
-            mod.progress = 100
             logger.info("Board marked done (traceability confirmed) | serial=%s | ip=%s", mod.serial, ip)
         self._notify()
 
@@ -276,26 +268,42 @@ class ModuleStore:
         self._notify()
 
     def clear_done(self) -> None:
-        """Remove all boards whose status is ``DONE`` or ``ERROR``."""
+        """Remove all boards whose status is ``DONE`` or ``ERROR``.
+
+        Cleared IPs are suppressed to prevent stale re-registrations.
+        """
         should_notify = False
         with self._lock:
             terminal = {BoardStatus.DONE, BoardStatus.ERROR}
             to_remove = [ip for ip, mod in self._modules.items() if mod.status in terminal]
             for ip in to_remove:
                 del self._modules[ip]
+                self._suppress_ip(ip)
             if to_remove:
-                logger.info("Cleared %d finished board(s): %s", len(to_remove), ", ".join(to_remove))
+                logger.info(
+                    "Cleared %d finished board(s): %s (IPs suppressed)",
+                    len(to_remove), ", ".join(to_remove),
+                )
                 should_notify = True
         if should_notify:
             self._notify()
 
     def clear_one(self, ip: str) -> None:
-        """Remove a single board by *ip* from the store."""
+        """Remove a single board by *ip* from the store.
+
+        The IP is also **suppressed** for ``IP_SUPPRESSION_TIMEOUT``
+        seconds to prevent stale TCP re-registrations from the old board.
+        """
         should_notify = False
         with self._lock:
             if ip in self._modules:
+                serial = self._modules[ip].serial
                 del self._modules[ip]
-                logger.info("Cleared single board | ip=%s", ip)
+                self._suppress_ip(ip)
+                logger.info(
+                    "Cleared single board | ip=%s | serial=%s | IP suppressed",
+                    ip, serial,
+                )
                 should_notify = True
             else:
                 logger.warning("clear_one called for unknown IP %s — ignored", ip)
@@ -303,11 +311,16 @@ class ModuleStore:
             self._notify()
 
     def clear_all(self) -> None:
-        """Remove **all** boards from the store regardless of state."""
+        """Remove **all** boards from the store regardless of state.
+
+        All current IPs are suppressed to prevent stale re-registrations.
+        """
         with self._lock:
+            for ip in self._modules:
+                self._suppress_ip(ip)
             count = len(self._modules)
             self._modules.clear()
-            logger.info("Cleared all %d board(s) from store", count)
+            logger.info("Cleared all %d board(s) from store (all IPs suppressed)", count)
         self._notify()
 
     # ── read ──────────────────────────────────────
@@ -448,74 +461,3 @@ class SerialListener:
                     self._store.register_board(ip=addr[0], serial=data)
             except Exception:
                 logger.error("Exception handling client %s:\n%s", addr[0], traceback.format_exc())
-
-
-# ──────────────────────────────────────────────────
-# NGINX log monitor
-# ──────────────────────────────────────────────────
-
-_IP_RE = re.compile(r"^(\d{1,3}(?:\.\d{1,3}){3})")
-
-
-class NginxMonitor:
-    """
-    Tails the NGINX access log and awards progress points to boards
-    whenever a known file-download pattern appears in a new log line.
-    """
-
-    def __init__(self, store: ModuleStore, log_path: str = NGINX_ACCESS_LOG) -> None:
-        self._store    = store
-        self._log_path = log_path
-        self._process: subprocess.Popen | None = None
-        self._thread   = threading.Thread(target=self._run, name="NginxMonitor", daemon=True)
-
-    def start(self) -> None:
-        """Start the background tail process."""
-        self._thread.start()
-        logger.info("NginxMonitor started — watching %s", self._log_path)
-
-    def stop(self) -> None:
-        """Terminate the tail subprocess so the port/PID is freed."""
-        proc = self._process
-        if proc and proc.poll() is None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=3)
-                logger.info("NginxMonitor tail process stopped")
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                logger.warning("NginxMonitor tail process killed")
-            except Exception:
-                logger.debug("Error stopping NginxMonitor tail", exc_info=True)
-        self._process = None
-
-    def _run(self) -> None:
-        """Long-running loop: ``tail -F`` the access log and process each line."""
-        try:
-            self._process = subprocess.Popen(
-                ["sudo", "tail", "-F", "-n", "0", self._log_path],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-            )
-            process = self._process
-            assert process.stdout is not None
-            logger.info("NginxMonitor: tail process PID=%d", process.pid)
-
-            for line in process.stdout:
-                self._process_line(line)
-
-        except Exception:
-            logger.error("Fatal exception in NginxMonitor:\n%s", traceback.format_exc())
-
-    def _process_line(self, line: str) -> None:
-        """Parse a single NGINX log line and award progress if applicable."""
-        match = _IP_RE.match(line)
-        if not match:
-            return
-        ip = match.group(1)
-
-        for key, points in FILE_PROGRESS.items():
-            if key in line:
-                self._store.apply_progress(ip, key, points)
-                break  # only award the first matching key per line

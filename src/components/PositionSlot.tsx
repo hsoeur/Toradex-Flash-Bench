@@ -41,22 +41,24 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
         <div className="pos-slot__body pos-slot__body--centered">
           <div className="pos-slot__insert-anim">
             <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
-              <rect x="12" y="8" width="32" height="20" rx="3" stroke="currentColor" strokeWidth="2" />
+              <rect x="8" y="14" width="40" height="8" rx="2" stroke="currentColor" strokeWidth="2" />
+              <rect x="14" y="26" width="28" height="4" rx="1" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" />
+              <rect x="14" y="33" width="20" height="4" rx="1" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 2" />
               <path
                 className="pos-slot__arrow-down"
-                d="M28 32v16M22 42l6 6 6-6"
+                d="M28 42v8M24 47l4 4 4-4"
                 stroke="currentColor"
-                strokeWidth="2.5"
+                strokeWidth="2"
                 strokeLinecap="round"
                 strokeLinejoin="round"
               />
             </svg>
           </div>
           <p className="pos-slot__message pos-slot__message--action">
-            Insérez la carte dans <strong>{label}</strong>
+            Scannez le <strong>code-barres de la carte</strong>
           </p>
           <p className="pos-slot__message pos-slot__message--hint">
-            puis appuyez sur <kbd>Entrée</kbd>
+            pour <strong>{label}</strong>
           </p>
         </div>
       )}
@@ -69,6 +71,11 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
               <path d="M6.34 6.34a8 8 0 1 0 11.32 0" />
             </svg>
           </div>
+          {slot.expectedSerial && (
+            <p className="pos-slot__serial-badge">
+              S/N {slot.expectedSerial}
+            </p>
+          )}
           <p className="pos-slot__message pos-slot__message--power">
             Lancez manuellement l'alimentation
           </p>
@@ -81,45 +88,18 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
 
       {(slot.state === 'flashing' || slot.state === 'done' || slot.state === 'error') && slot.boardIp && slot.boardData && (
         <div className="pos-slot__body pos-slot__body--vnc">
-          {/* Progress bar */}
-          {slot.state === 'flashing' && slot.boardData.status !== 'waiting' && (
-            <div className="pos-slot__progress">
-              <div className="pos-slot__progress-track">
-                <div
-                  className="pos-slot__progress-fill"
-                  style={{ width: `${slot.boardData.progress}%` }}
-                />
-              </div>
-              <span className="pos-slot__progress-pct">{slot.boardData.progress}%</span>
-            </div>
-          )}
 
-          {/* Show a "waiting for Tezi" message when card is detected but not yet flashing */}
-          {slot.state === 'flashing' && slot.boardData.status === 'waiting' ? (
-            <div className="pos-slot__body pos-slot__body--centered">
-              <div className="pos-slot__spinner" />
-              <p className="pos-slot__message pos-slot__message--info">
-                Carte détectée sur {label}
-              </p>
-              <p className="pos-slot__message pos-slot__message--hint">
-                Démarrage de Tezi en cours…
-              </p>
-              <p className="pos-slot__message pos-slot__message--muted" style={{ fontSize: '0.75rem' }}>
-                {slot.boardData.serial} — {slot.boardIp}
-              </p>
-            </div>
-          ) : (
-            <div className="pos-slot__vnc-container">
-              <VncViewer
-                ip={slot.boardIp}
-                serial={slot.boardData.serial}
-                wsPort={wsPort}
-                startTime={slot.boardData.startTime}
-                boardStatus={slot.boardData.status}
-                errorMessage={slot.boardData.errorMessage ?? null}
-              />
-            </div>
-          )}
+          {/* Always show VNC viewer as soon as the board is detected */}
+          <div className="pos-slot__vnc-container">
+            <VncViewer
+              ip={slot.boardIp}
+              serial={slot.boardData.serial}
+              wsPort={wsPort}
+              startTime={slot.boardData.startTime}
+              boardStatus={slot.boardData.status}
+              errorMessage={slot.boardData.errorMessage ?? null}
+            />
+          </div>
 
           {/* Re-scan hint below the VNC viewer */}
           {(slot.state === 'done' || slot.state === 'error') && (

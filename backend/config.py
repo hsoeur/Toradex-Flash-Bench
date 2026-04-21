@@ -49,7 +49,3 @@ IMAGE_LIST_FILE = os.path.join(IMAGE_ROOT, "image_list.json")
 
 SERIAL_TCP_HOST = "0.0.0.0"
 SERIAL_TCP_PORT = 5000
-
-# ── NGINX log path ───────────────────────────────
-
-NGINX_ACCESS_LOG = "/var/log/nginx/access.log"
