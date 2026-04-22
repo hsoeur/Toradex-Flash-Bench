@@ -276,7 +276,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         };
         return updated;
       });
-      showFeedback(`✅ POS${idx + 1} — S/N ${serial} — mettez la carte sous tension`);
+      showFeedback(`✅ POS${idx + 1} — S/N ${serial} — lancez manuellement l'alimentation de la carte`);
 
       // Check if board already available in modules
       const modules = modulesRef.current;

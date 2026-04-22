@@ -55,7 +55,7 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
             </svg>
           </div>
           <p className="pos-slot__message pos-slot__message--action">
-            Scannez le <strong>code-barres de la carte</strong>
+            Insérez la carte puis scannez son <strong>code-barres</strong>
           </p>
           <p className="pos-slot__message pos-slot__message--hint">
             pour <strong>{label}</strong>
@@ -77,7 +77,7 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
             </p>
           )}
           <p className="pos-slot__message pos-slot__message--power">
-            Lancez manuellement l'alimentation
+            Lancez manuellement l'alimentation de la carte
           </p>
           <p className="pos-slot__message pos-slot__message--hint">
             Appuyez sur le bouton d'alimentation de <strong>{label}</strong>
@@ -104,7 +104,7 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
           {/* Re-scan hint below the VNC viewer */}
           {(slot.state === 'done' || slot.state === 'error') && (
             <div className={`pos-slot__rescan-hint pos-slot__rescan-hint--${slot.state}`}>
-              Re-scannez <strong>{label}</strong> pour un nouveau cycle
+              Eteindre puis Re-scannez <strong>{label}</strong> pour un nouveau cycle
             </div>
           )}
         </div>
