@@ -41,6 +41,7 @@ from monitor import ModuleStore, SerialListener
 from services import ServicesManager
 from vnc_proxy import VncProxyManager
 from recovery import RecoveryRunner
+from power_control import PowerController
 
 module_store = ModuleStore()
 
@@ -63,6 +64,14 @@ module_store.subscribe(_on_modules_changed)
 
 # Recovery runner
 recovery_runner = RecoveryRunner(socketio)
+
+# Power controller (Board Interface)
+power_controller = PowerController()
+try:
+    power_controller.init()
+    power_controller.reset_all_outputs()
+except Exception:
+    logger.warning("Board Interface not available at startup — power control disabled until reconnect")
 
 
 # Serial listener
@@ -106,6 +115,7 @@ sio_events.register(
     serial_listener=serial_listener,
     vnc_proxy=vnc_proxy,
     recovery_runner=recovery_runner,
+    power_controller=power_controller,
     sio_log_handler=sio_log_handler,
     service_log_buffer=service_log_buffer,
 )
@@ -163,10 +173,38 @@ def _shutdown() -> None:
     """Graceful shutdown — stop child processes so ports are freed for the next start."""
     logger.info("Shutting down FlashBench backend…")
     try:
+        power_controller.close()
+    except Exception:
+        logger.debug("power_controller.close failed", exc_info=True)
+    try:
         vnc_proxy.stop()
     except Exception:
         logger.debug("vnc_proxy.stop failed", exc_info=True)
     logger.info("Shutdown complete")
+
+
+def _start_board_interface_healthcheck() -> None:
+    """Periodically check board interface connectivity and emit status."""
+    import threading as _th
+    import time as _time
+
+    def _loop():
+        last_state: bool | None = None
+        while True:
+            connected = power_controller.check_connection()
+            if connected != last_state:
+                last_state = connected
+                try:
+                    socketio.emit("board_interface_status", power_controller.get_status())
+                except Exception:
+                    pass
+                if not connected:
+                    logger.warning("Board Interface disconnected — attempting reconnect")
+                    power_controller.init()
+            _time.sleep(10)
+
+    t = _th.Thread(target=_loop, name="BoardIfaceHealth", daemon=True)
+    t.start()
 
 
 def main() -> None:
@@ -181,12 +219,15 @@ def main() -> None:
     logger.info("  Flask-SocketIO : http://%s:%d", FLASK_HOST, FLASK_PORT)
     logger.info("  Serial TCP     : port %d", SERIAL_TCP_PORT)
     logger.info("  VNC proxy      : ws://0.0.0.0:%d", vnc_proxy.port)
+    logger.info("  Board Iface    : %s", power_controller.get_status())
     logger.info("═" * 60)
 
     # Start background workers
     serial_listener.start()
     services_manager.start()
     vnc_proxy.start()
+    module_store.start_timeout_watchdog()
+    _start_board_interface_healthcheck()
 
     # Start Flask-SocketIO (blocking)
     socketio.run(

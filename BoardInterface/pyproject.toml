@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "board-interface"
+version = "0.1.0"
+description = "Python driver for controlling the InterfaceBoard used by Toradex Flash Bench power automation."
+requires-python = ">=3.10"
+dependencies = [
+    "pyserial>=3.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["board_interface*"]

@@ -64,6 +64,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatus>(DEFAULT_MONITOR_STATUS);
   const [socket, setSocket] = useState<Socket | null>(null);
   const [vncWsPort, setVncWsPort] = useState<number>(6080);
+  const [boardInterfaceConnected, setBoardInterfaceConnected] = useState<boolean>(false);
 
   // ── Position slot state ───────────────────────
   const [slots, setSlots] = useState<PositionSlotType[]>(initSlots);
@@ -99,6 +100,8 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
     setScanFeedback(msg);
     setTimeout(() => setScanFeedback(''), 3000);
   }, []);
+  const showFeedbackRef = useRef(showFeedback);
+  showFeedbackRef.current = showFeedback;
 
   // ── Socket.IO connection ──────────────────────
   useEffect(() => {
@@ -114,6 +117,22 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
     s.on('services_status', (data: ServicesStatus) => setServicesStatus(data));
     s.on('monitor_status',  (data: MonitorStatus)  => setMonitorStatus(data));
     s.on('vnc_config',      (data: { ws_port: number }) => setVncWsPort(data.ws_port));
+
+    // Board Interface status
+    s.on('board_interface_status', (data: { connected: boolean }) => {
+      setBoardInterfaceConnected(data.connected);
+    });
+
+    // Power operation results
+    s.on('power_status', (data: { position: number; status: string; message?: string }) => {
+      if (data.status === 'powered_on') {
+        setBoardInterfaceConnected(true);
+      } else if (data.status === 'error') {
+        showFeedbackRef.current(
+          `⚠️ Erreur alimentation POS${data.position} : ${data.message ?? 'erreur inconnue'}`
+        );
+      }
+    });
 
     // modules_update: update ref + trigger slot mapping
     s.on('modules_update', (data: ModulesMap) => {
@@ -176,6 +195,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         }
 
         // Update boardData for all assigned slots from latest modules
+        const slotsToTurnOff: number[] = [];
         for (let i = 0; i < updated.length; i++) {
           const slot = updated[i];
           if (slot.boardIp && newModules[slot.boardIp]) {
@@ -185,12 +205,23 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
               mod.status === 'error' ? 'error' :
               (mod.status === 'flashing' || mod.status === 'waiting') ? 'flashing' :
               slot.state;
+
+            // Detect transition from flashing → done/error → power OFF
+            if (slot.state === 'flashing' && (newState === 'done' || newState === 'error')) {
+              slotsToTurnOff.push(i + 1); // 1-based position
+            }
+
             updated[i] = {
               ...slot,
               state: (slot.state === 'flashing' || slot.state === 'done' || slot.state === 'error') ? newState : slot.state,
               boardData: mod,
             };
           }
+        }
+
+        // Power OFF boards that finished flashing (done or error)
+        for (const position of slotsToTurnOff) {
+          socketRef.current?.emit('power_off_board', { position });
         }
 
         return updated;
@@ -276,7 +307,10 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         };
         return updated;
       });
-      showFeedback(`✅ POS${idx + 1} — S/N ${serial} — lancez manuellement l'alimentation de la carte`);
+      showFeedback(`✅ POS${idx + 1} — S/N ${serial} — mise sous tension automatique…`);
+
+      // Trigger automatic power ON via Board Interface
+      socketRef.current?.emit('power_on_board', { position: idx + 1 });
 
       // Check if board already available in modules
       const modules = modulesRef.current;
@@ -501,6 +535,10 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
                 monitorStatus.retry_count > 0 ? ` (${monitorStatus.retry_count} retry)` : ''
               }`}
             />
+            <span
+              className={`dashboard__db-dot dashboard__db-dot--${boardInterfaceConnected ? 'connected' : 'disconnected'}`}
+              title={`Board Interface — ${boardInterfaceConnected ? 'connectée' : 'déconnectée'}`}
+            />
           </button>
 
           <div className={`dashboard__conn dashboard__conn--${connectionStatus}`}>
@@ -583,7 +621,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
                   <path d="M6.34 6.34a8 8 0 1 0 11.32 0" />
                 </svg>
               </span>
-              Lancez l'alimentation des cartes en attente
+              Mise sous tension automatique — en attente de démarrage des cartes
             </>
           ) : (
             <>
@@ -614,6 +652,8 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
               slot={slot}
               wsPort={vncWsPort}
               isActiveTarget={idx === awaitingCardSlot}
+              boardInterfaceConnected={boardInterfaceConnected}
+              onRetryPower={() => socketRef.current?.emit('power_on_board', { position: idx + 1 })}
             />
           ))}
         </div>
@@ -633,6 +673,7 @@ export default function FlashDashboard({ operatorId, operatorName, orderNumber, 
         onClose={() => setServicesOpen(false)}
         servicesStatus={servicesStatus}
         monitorStatus={monitorStatus}
+        boardInterfaceConnected={boardInterfaceConnected}
       />
 
       {/* Traceability slide-in panel (right) */}

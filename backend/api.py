@@ -4,6 +4,7 @@ from pydantic import BaseModel
 import mysql.connector
 from mysql.connector import Error
 import logging
+import re
 
 app = FastAPI()
 
@@ -55,35 +56,86 @@ DB_CONFIG = {
 }
 
 # =========================
-# GET NEXT MAC
+# MAC ADDRESS GENERATION
+# =========================
+# OUI prefix (first 3 bytes). Change to your assigned prefix.
+MAC_PREFIX = "14:2D:F5"
+# First address to generate when the table is empty
+MAC_START  = "14:2D:F5:00:3B:5B"
+
+
+def _mac_to_int(mac: str) -> int:
+    """Convert a MAC string 'AA:BB:CC:DD:EE:FF' to a 48-bit integer."""
+    return int(mac.replace(":", ""), 16)
+
+
+def _int_to_mac(val: int) -> str:
+    """Convert a 48-bit integer back to a MAC string 'AA:BB:CC:DD:EE:FF'."""
+    hex_str = f"{val:012X}"
+    return ":".join(hex_str[i:i+2] for i in range(0, 12, 2))
+
+
+# =========================
+# GET NEXT MAC (generated on-the-fly)
 # =========================
 @app.get("/next-mac")
 def get_next_mac():
+    """
+    Generate the next MAC address sequentially.
+    - If the table is empty, start from MAC_START.
+    - Otherwise increment the highest existing MAC by 1.
+    - INSERT the new MAC as RESERVED and return it.
+    No pre-filled pool required.
+    """
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
         cursor = conn.cursor(dictionary=True)
 
+        conn.start_transaction()
+
+        # Find the highest MAC already in the table
         cursor.execute("""
-            SELECT Id, MacAddress
+            SELECT MacAddress
             FROM MacAddresses
-            WHERE Status = 'AVAILABLE'
+            ORDER BY Id DESC
             LIMIT 1
+            FOR UPDATE
         """)
+        row = cursor.fetchone()
 
-        mac = cursor.fetchone()
+        if row:
+            last_int = _mac_to_int(row["MacAddress"])
+            next_int = last_int + 1
+        else:
+            next_int = _mac_to_int(MAC_START)
 
-        if not mac:
-            logger.warning("No MAC available")
-            raise HTTPException(status_code=404, detail="No MAC available")
+        new_mac = _int_to_mac(next_int)
 
-        logger.info(f"MAC requested -> Id={mac['Id']} Address={mac['MacAddress']}")
+        # Validate the prefix is still correct (overflow protection)
+        if not new_mac.startswith(MAC_PREFIX):
+            conn.rollback()
+            logger.error(f"MAC range exhausted: {new_mac} no longer matches prefix {MAC_PREFIX}")
+            raise HTTPException(status_code=500, detail="MAC address range exhausted")
+
+        # Insert the newly generated MAC
+        cursor.execute("""
+            INSERT INTO MacAddresses (MacAddress, Status, ReservedAt, CreatedAt)
+            VALUES (%s, 'RESERVED', NOW(), NOW())
+        """, (new_mac,))
+
+        mac_id = cursor.lastrowid
+        conn.commit()
+
+        logger.info(f"MAC generated -> Id={mac_id} Address={new_mac}")
 
         return {
-            "macId": mac["Id"],
-            "macAddress": mac["MacAddress"]
+            "macId": mac_id,
+            "macAddress": new_mac
         }
 
     except Error as e:
+        if 'conn' in locals():
+            conn.rollback()
         logger.error(f"Database error in /next-mac: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -131,9 +183,9 @@ def save_programmed_board(data: ProgrammedBoardRequest):
             logger.warning(f"MAC Id={data.macId} not found")
             raise HTTPException(status_code=404, detail="MAC not found")
 
-        if mac["Status"] != "AVAILABLE":
+        if mac["Status"] not in ("AVAILABLE", "RESERVED"):
             conn.rollback()
-            logger.warning(f"MAC Id={data.macId} already used")
+            logger.warning(f"MAC Id={data.macId} already used (status={mac['Status']})")
             raise HTTPException(status_code=400, detail="MAC already used")
 
         client_mac = mac["MacAddress"]

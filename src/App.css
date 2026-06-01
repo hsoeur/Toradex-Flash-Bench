@@ -2015,6 +2015,24 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
   padding: 3px 10px;
   border-radius: 20px;
   white-space: nowrap;
+  transition: color 0.3s, background 0.3s;
+}
+
+.vnc-viewer__timer--warning {
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.15);
+  animation: timer-pulse 2s ease-in-out infinite;
+}
+
+.vnc-viewer__timer--critical {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.18);
+  animation: timer-pulse 1s ease-in-out infinite;
+}
+
+@keyframes timer-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
 }
 
 .vnc-viewer--done .vnc-viewer__timer {
@@ -2533,6 +2551,34 @@ body { background: var(--bg); color: var(--text-primary); min-height: 100vh; tra
 .pos-slot__power-icon {
   color: var(--yellow);
   animation: pulse-power 1.5s ease-in-out infinite;
+}
+
+.pos-slot__power-icon--auto {
+  color: var(--green);
+  animation: pulse-power 1.5s ease-in-out infinite;
+}
+
+/* ── Retry power button ── */
+.pos-slot__retry-btn {
+  margin-top: 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--yellow);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  color: var(--yellow);
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.1s;
+}
+
+.pos-slot__retry-btn:hover {
+  background: color-mix(in srgb, var(--yellow) 30%, transparent);
+  transform: scale(1.03);
+}
+
+.pos-slot__retry-btn:active {
+  transform: scale(0.97);
 }
 
 @keyframes pulse-power {

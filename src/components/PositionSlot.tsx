@@ -6,9 +6,11 @@ interface Props {
   slot: PositionSlotType;
   wsPort: number;
   isActiveTarget: boolean; // This slot is waiting for Enter confirmation
+  boardInterfaceConnected: boolean;
+  onRetryPower: () => void;
 }
 
-export default function PositionSlot({ position, slot, wsPort, isActiveTarget }: Props) {
+export default function PositionSlot({ position, slot, wsPort, isActiveTarget, boardInterfaceConnected, onRetryPower }: Props) {
   const label = `POS${position}`;
 
   const slotClass = [
@@ -65,7 +67,7 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
 
       {slot.state === 'awaiting_boot' && (
         <div className="pos-slot__body pos-slot__body--centered">
-          <div className="pos-slot__power-icon">
+          <div className="pos-slot__power-icon pos-slot__power-icon--auto">
             <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 2v6" />
               <path d="M6.34 6.34a8 8 0 1 0 11.32 0" />
@@ -77,11 +79,20 @@ export default function PositionSlot({ position, slot, wsPort, isActiveTarget }:
             </p>
           )}
           <p className="pos-slot__message pos-slot__message--power">
-            Lancez manuellement l'alimentation de la carte
+            Mise sous tension automatique…
           </p>
           <p className="pos-slot__message pos-slot__message--hint">
-            Appuyez sur le bouton d'alimentation de <strong>{label}</strong>
+            En attente du démarrage de la carte <strong>{label}</strong>
           </p>
+          {!boardInterfaceConnected && (
+            <button
+              className="pos-slot__retry-btn"
+              onClick={(e) => { e.stopPropagation(); onRetryPower(); }}
+              title="Réessayer la mise sous tension"
+            >
+              ↻ Réessayer alimentation
+            </button>
+          )}
           <div className="pos-slot__waiting-dot" />
         </div>
       )}

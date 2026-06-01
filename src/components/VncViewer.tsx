@@ -15,6 +15,13 @@ const RETRY_DELAY = 1_000;
  */
 const CONNECT_TIMEOUT = 5_000;
 
+/** Flash timeout in seconds — must match backend FLASH_TIMEOUT_S */
+const FLASH_TIMEOUT_S = 1200; // 20 min
+/** Start warning (orange) at 75 % of timeout */
+const TIMEOUT_WARN_S = FLASH_TIMEOUT_S * 0.75;   // 15 min
+/** Critical warning (red) at 90 % of timeout */
+const TIMEOUT_CRIT_S = FLASH_TIMEOUT_S * 0.90;    // 18 min
+
 interface Props {
   ip: string;
   serial: string;
@@ -230,6 +237,18 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, 
     boardStatus === 'error' ? 'vnc-viewer--error' : '',
   ].filter(Boolean).join(' ');
 
+  // Timer urgency class (only while flashing)
+  const timerClass = [
+    'vnc-viewer__timer',
+    boardStatus === 'flashing' || boardStatus === 'waiting'
+      ? elapsed >= TIMEOUT_CRIT_S
+        ? 'vnc-viewer__timer--critical'
+        : elapsed >= TIMEOUT_WARN_S
+          ? 'vnc-viewer__timer--warning'
+          : ''
+      : '',
+  ].filter(Boolean).join(' ');
+
   return (
     <div className={viewerClass}>
       <div className="vnc-viewer__header">
@@ -237,7 +256,7 @@ export default function VncViewer({ ip, serial, wsPort, startTime, boardStatus, 
           <span className="vnc-viewer__serial">{serial}</span>
         </div>
         {startTime && boardStatus !== 'waiting' && (
-          <span className="vnc-viewer__timer">
+          <span className={timerClass} title={`Timeout auto : ${FLASH_TIMEOUT_S / 60} min`}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
               <circle cx="8" cy="9" r="6" stroke="currentColor" strokeWidth="1.3" />
               <path d="M8 6v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" />

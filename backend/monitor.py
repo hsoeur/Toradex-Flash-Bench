@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict
 
-from config import SERIAL_TCP_HOST, SERIAL_TCP_PORT
+from config import SERIAL_TCP_HOST, SERIAL_TCP_PORT, FLASH_TIMEOUT_S
 
 logger = logging.getLogger("FlashBench.Monitor")
 
@@ -172,11 +172,13 @@ class ModuleStore:
                 )
                 return
 
+            now = time.time()
             if ip not in self._modules:
-                self._modules[ip] = BoardModule(serial=serial, registered_at=time.time())
+                self._modules[ip] = BoardModule(serial=serial, registered_at=now, start_time=now)
                 logger.info("Board registered | serial=%s | ip=%s", serial, ip)
             else:
                 self._modules[ip].reset(serial)
+                self._modules[ip].start_time = now
                 logger.info("Board re-registered (reset) | serial=%s | ip=%s", serial, ip)
         self._notify()
 
@@ -322,6 +324,53 @@ class ModuleStore:
             self._modules.clear()
             logger.info("Cleared all %d board(s) from store (all IPs suppressed)", count)
         self._notify()
+
+    # ── timeout watchdog ──────────────────────────
+
+    def start_timeout_watchdog(self, interval: int = 30) -> None:
+        """Launch a daemon thread that marks boards as ERROR if they exceed
+        ``FLASH_TIMEOUT_S`` without completing.
+
+        The watchdog runs every *interval* seconds.
+        """
+        def _loop() -> None:
+            while True:
+                time.sleep(interval)
+                self._check_timeouts()
+
+        t = threading.Thread(target=_loop, name="FlashTimeoutWatchdog", daemon=True)
+        t.start()
+        logger.info(
+            "Flash timeout watchdog started | timeout=%ds | check_interval=%ds",
+            FLASH_TIMEOUT_S, interval,
+        )
+
+    def _check_timeouts(self) -> None:
+        """Mark boards that have been in a non-terminal state for longer than
+        ``FLASH_TIMEOUT_S`` as ERROR."""
+        now = time.time()
+        timed_out: list[str] = []
+        terminal = {BoardStatus.DONE, BoardStatus.ERROR}
+
+        with self._lock:
+            for ip, mod in self._modules.items():
+                if mod.status in terminal:
+                    continue
+                elapsed = now - (mod.start_time or mod.registered_at)
+                if elapsed >= FLASH_TIMEOUT_S:
+                    mod.status = BoardStatus.ERROR
+                    mod.error_message = (
+                        f"Timeout — aucune réponse après {FLASH_TIMEOUT_S // 60} min "
+                        f"de flashage (Tezi probablement bloqué)"
+                    )
+                    timed_out.append(ip)
+                    logger.error(
+                        "TIMEOUT | ip=%s | serial=%s | elapsed=%.0fs | limit=%ds",
+                        ip, mod.serial, elapsed, FLASH_TIMEOUT_S,
+                    )
+
+        if timed_out:
+            self._notify()
 
     # ── read ──────────────────────────────────────
 

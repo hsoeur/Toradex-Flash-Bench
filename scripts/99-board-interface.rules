@@ -1,0 +1,12 @@
+# Board Interface udev rule
+# Creates a stable symlink /dev/board_interface for the USB-serial interface board.
+# Adjust idVendor/idProduct to match your actual hardware.
+#
+# Install:
+#   sudo cp 99-board-interface.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Find your device's VID/PID with:
+#   udevadm info -a -n /dev/ttyUSB0 | grep -i 'idVendor\|idProduct'
+
+SUBSYSTEM=="tty", ATTRS{idVendor}=="0403", ATTRS{idProduct}=="6001", SYMLINK+="board_interface", MODE="0666"

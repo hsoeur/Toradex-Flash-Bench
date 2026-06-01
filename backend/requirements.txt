@@ -4,5 +4,6 @@ flask-cors>=4.0
 python-socketio>=5.10
 websockify>=0.11       # VNC WebSocket proxy for board monitoring
 requests>=2.31         # HTTP calls to external traceability API
+pyserial>=3.5          # USB-serial communication with the interface board
 # No eventlet/gevent needed — async_mode="threading" is used (see main.py)
 

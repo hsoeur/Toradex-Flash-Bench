@@ -42,6 +42,7 @@ interface Props {
   onClose: () => void;
   servicesStatus: ServicesStatus;
   monitorStatus: MonitorStatus;
+  boardInterfaceConnected: boolean;
 }
 
 // ──────────────────────────────────────────────────
@@ -143,7 +144,7 @@ async function callRecoveryApi(path: string) {
   }
 }
 
-export default function ServicesPanel({ socket, open, onClose, servicesStatus, monitorStatus }: Props) {
+export default function ServicesPanel({ socket, open, onClose, servicesStatus, monitorStatus, boardInterfaceConnected }: Props) {
   const [activeTab, setActiveTab] = useState<ServiceSource>('dhcp');
   const [logs, setLogs] = useState<Record<ServiceSource, ServiceLogEntry[]>>({
     dhcp: [], nginx: [], db: [], recovery: [],
@@ -252,6 +253,17 @@ export default function ServicesPanel({ socket, open, onClose, servicesStatus, m
             )}
           </span>
         </div>
+
+        {/* Board Interface (power control) status bar */}
+        <div className={`svc-monitor-bar svc-monitor-bar--${boardInterfaceConnected ? 'running' : 'error'}`}>
+          <span className="svc-monitor-bar__dot" />
+          <span className="svc-monitor-bar__text">
+            <strong>Board Interface</strong>
+            {' — '}
+            {boardInterfaceConnected ? 'Connectée (alimentation auto)' : 'Déconnectée'}
+          </span>
+        </div>
+
         <div className="svc-tabs">
           {TABS.map(tab => (
             <button

@@ -13,6 +13,7 @@ import image_service
 import session
 from log_handler import ServiceLogBuffer, SocketIOLogHandler
 from monitor import ModuleStore
+from power_control import PowerController, PowerControlError
 from recovery import RecoveryRunner
 from services import ServicesManager
 from vnc_proxy import VncProxyManager
@@ -28,6 +29,7 @@ def register(
     serial_listener,                        # SerialListener (avoid circular import typing)
     vnc_proxy:          VncProxyManager,
     recovery_runner:    RecoveryRunner,
+    power_controller:   PowerController,
     sio_log_handler:    SocketIOLogHandler,
     service_log_buffer: ServiceLogBuffer,
 ) -> None:
@@ -50,6 +52,7 @@ def register(
         sio_emit("monitor_status",  serial_listener.get_status())
         sio_emit("vnc_config",      {"ws_port": vnc_proxy.port})
         sio_emit("recovery_status", recovery_runner.get_status())
+        sio_emit("board_interface_status", power_controller.get_status())
 
         # Send current images list
         try:
@@ -115,3 +118,107 @@ def register(
             return
         logger.info("Client requested single board reset | ip=%s", ip)
         module_store.clear_one(ip)
+
+    # ── Power control events ────────────────────────
+
+    @socketio.on("power_on_board")
+    def handle_power_on_board(data=None):
+        """Power ON the fixture output for a given position."""
+        from flask_socketio import emit as sio_emit
+
+        if not data or not isinstance(data, dict):
+            logger.warning("power_on_board called without data")
+            return
+
+        position = data.get("position")
+        if not isinstance(position, int) or position < 1 or position > 5:
+            logger.warning("power_on_board: invalid position=%s", position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": f"Position invalide: {position}",
+            })
+            return
+
+        logger.info("Power ON requested | position=POS%d", position)
+        try:
+            power_controller.power_on(position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "powered_on",
+            })
+        except PowerControlError as e:
+            logger.error("Power ON failed | position=POS%d | error=%s", position, e)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": str(e),
+            })
+
+    @socketio.on("power_off_board")
+    def handle_power_off_board(data=None):
+        """Power OFF the fixture output for a given position."""
+        from flask_socketio import emit as sio_emit
+
+        if not data or not isinstance(data, dict):
+            logger.warning("power_off_board called without data")
+            return
+
+        position = data.get("position")
+        if not isinstance(position, int) or position < 1 or position > 5:
+            logger.warning("power_off_board: invalid position=%s", position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": f"Position invalide: {position}",
+            })
+            return
+
+        logger.info("Power OFF requested | position=POS%d", position)
+        try:
+            power_controller.power_off(position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "powered_off",
+            })
+        except PowerControlError as e:
+            logger.error("Power OFF failed | position=POS%d | error=%s", position, e)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": str(e),
+            })
+
+    @socketio.on("power_cycle_board")
+    def handle_power_cycle_board(data=None):
+        """Power CYCLE (OFF→wait→ON) the fixture output for a given position."""
+        from flask_socketio import emit as sio_emit
+
+        if not data or not isinstance(data, dict):
+            logger.warning("power_cycle_board called without data")
+            return
+
+        position = data.get("position")
+        if not isinstance(position, int) or position < 1 or position > 5:
+            logger.warning("power_cycle_board: invalid position=%s", position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": f"Position invalide: {position}",
+            })
+            return
+
+        logger.info("Power CYCLE requested | position=POS%d", position)
+        try:
+            power_controller.power_cycle(position)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "powered_on",
+            })
+        except PowerControlError as e:
+            logger.error("Power CYCLE failed | position=POS%d | error=%s", position, e)
+            sio_emit("power_status", {
+                "position": position,
+                "status": "error",
+                "message": str(e),
+            })
