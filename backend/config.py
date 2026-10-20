@@ -25,7 +25,7 @@ LOG_BUFFER_MAXLEN  = 500
 
 # ── External traceability API ────────────────────
 
-EXTERNAL_API_URL   = "http://192.168.10.1:10000"
+EXTERNAL_API_URL   = "http://localhost:10000"
 PRODUCT_UID        = "04IN00145"
 MACHINE_UID        = "MO03B"
 OPERATION_NUMBER   = 30
